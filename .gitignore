@@ -1,0 +1,5 @@
+.python-version
+*.pyc
+*.swp
+*-checkpoint.ipynb
+scratch
