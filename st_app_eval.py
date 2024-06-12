@@ -98,14 +98,16 @@ def simple_val(v):
         return v
 
 
-def expand_ref_column(df, column):
+def expanded_ref_column(df, column):
     ref_vals = resolve_refs(df[column])
-    # TODO: this is not general enough, only works for objects and dicts
-    from weave.trace.serialize import to_json
-
     ref_vals = simple_val(ref_vals)
     ref_val_df = pd.json_normalize(ref_vals)
     ref_val_df.index = df.index
+    return ref_val_df
+
+
+def expand_ref_column(df, column):
+    ref_val_df = expanded_ref_column(df, column)
     # add ref vals to df with keys <column>.<key>
     column_index = df.columns.get_loc(column)
     df = df.copy()
@@ -117,6 +119,15 @@ def expand_ref_column(df, column):
 def parse_ref(x):
     try:
         parsed = weave.trace.refs.parse_uri(x)
+        nice_name = f"{parsed.name}:{parsed.digest[:3]}"
+        if parsed.extra:
+            for i in range(0, len(parsed.extra), 2):
+                k = parsed.extra[i]
+                v = parsed.extra[i + 1]
+                if k == "id":
+                    nice_name += f"/{v[:4]}"
+        return nice_name
+
         return f"{parsed.name}:{parsed.digest[:3]}"
     except ValueError:
         return x
@@ -152,6 +163,45 @@ def st_write_dict(d):
             st.write(f"**{key}**", value)
         elif isinstance(value, bool):
             st.write(f"**{key}**", value)
+
+
+def st_write_compare_dict(dicts, headers):
+    keys = set()
+    for d in dicts:
+        keys.update(d.keys())
+
+    diff_keys = []
+    common_keys = []
+
+    for key in keys:
+        values = [d.get(key, None) for d in dicts]
+        if all(v == values[0] for v in values):
+            common_keys.append(key)
+        else:
+            diff_keys.append(key)
+
+    cols = st.columns([1] + [2] * len(dicts))
+    cols_iter = iter(cols)
+    col0 = next(cols_iter)
+    for col, value in zip(cols_iter, headers):
+        col.write(f"**{value}**")
+
+    show_diff = st.toggle("Differences", value=True)
+    if show_diff:
+        for key in diff_keys:
+            cols = st.columns([1] + [2] * len(dicts))
+            cols_iter = iter(cols)
+            col0 = next(cols_iter)
+            col0.write(f"**{key}**")
+            for col, value in zip(cols_iter, [d.get(key, None) for d in dicts]):
+                col.write(value)
+
+    show_common = st.toggle("Common Values")
+    if show_common:
+        for key in common_keys:
+            cols = st.columns((1, 2 * len(dicts)))
+            cols[0].write(f"**{key}**")
+            cols[1].write(dicts[0].get(key))
 
 
 with st.sidebar:
@@ -288,25 +338,26 @@ if len(compare_vals) < 2:
     st.warning("Select at least two points to compare on the chart above")
     st.stop()
 
+compare_vals_render = [
+    # streamlit write/text removes stuff after ":", so escape it
+    str(compare_val_stats_df.loc[compare_val, compare_key_render]).replace(":", "\\:")
+    for compare_val in compare_vals
+]
 compare_val0 = compare_vals[0]
-compare_val0_render = compare_val_stats_df.loc[compare_val0, compare_key_render]
+compare_val0_render = compare_vals_render[0]
 compare_val1 = compare_vals[1]
-compare_val1_render = compare_val_stats_df.loc[compare_val1, compare_key_render]
+compare_val1_render = compare_vals_render[1]
 
 if is_ref_column(compare_val_stats_df, compare_key):
-    compare_val_stats_df = expand_ref_column(compare_val_stats_df, compare_key)
-sel_model_stats = compare_val_stats_df.loc[compare_vals,]
-with st.expander(
-    f"Comparing {compare_val0_render} and {compare_val1_render} (First two of {len(sel_model_stats)} selected)"
-):
-    st.json(compare_vals, expanded=False)
-    col0, col1 = st.columns(2)
-    with col0:
-        st.subheader(compare_val0_render, divider=True)
-        st_write_dict(sel_model_stats.loc[compare_val0])
-    with col1:
-        st.subheader(compare_val1_render, divider=True)
-        st_write_dict(sel_model_stats.loc[compare_val1])
+    # compare_val_stats_df = expand_ref_column(compare_val_stats_df, compare_key)
+    expanded_df = expanded_ref_column(compare_val_stats_df, compare_key)
+    compare_vals_df = expanded_df.loc[compare_vals,]
+    with st.expander(
+        f"Comparing **{compare_val0_render}** and **{compare_val1_render}** [First 2 of {len(compare_vals_df)} selected]"
+    ):
+        st_write_compare_dict(
+            compare_vals_df.to_dict(orient="records")[:2], compare_vals_render[:2]
+        )
 
 ##### Second level comparison by across_key #####
 
