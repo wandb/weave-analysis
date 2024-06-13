@@ -101,6 +101,8 @@ def weave_client_ops(
     else:
         filter = filter.model_copy()
     filter = cast(_ObjectVersionFilter, filter)
+    # TODO: fetches latest_only. Need to be more general.
+    filter.latest_only = True
     filter.is_op = True
 
     response = self.server.objs_query(

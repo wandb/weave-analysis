@@ -294,20 +294,11 @@ with st.sidebar:
         ),
     )
     across_key = st.selectbox("Across", ordered_compare_columns)
-
-##### Per compare val plot, showing target0 v. target1 #####
-
-compare_vals = calls[compare_key].unique()
-compare_val_stats_df = calls.groupby(compare_key).agg(
-    {compare_key_render: "first", **{k: ["mean", "sem"] for k in target_keys}}
-)
-compare_val_stats_df.columns = [".".join(col) for col in compare_val_stats_df.columns]
-compare_val_stats_df.rename(
-    {f"{compare_key_render}.first": compare_key_render}, axis=1, inplace=True
-)
-compare_val_stats_df[compare_key] = compare_val_stats_df.index
-
-st.header(f"Comparing *{op_obj.object_id}* calls by *{compare_key}*")
+    across_key_render = f"{across_key}.render"
+    if is_ref_column(calls, across_key):
+        calls[across_key_render] = calls[across_key].apply(parse_ref)
+    else:
+        calls[across_key_render] = calls[across_key]
 
 
 if len(target_keys) < 2:
@@ -316,26 +307,47 @@ if len(target_keys) < 2:
 target0 = target_keys[0]
 target1 = target_keys[1]
 
+##### Per compare val plot, showing target0 v. target1 #####
 
-fig = px.scatter(
-    compare_val_stats_df,
-    x=f"{target1}.mean",
-    error_x=f"{target1}.sem",
-    y=f"{target0}.mean",
-    error_y=f"{target0}.sem",
-    custom_data=[compare_key],
-    labels={compare_key_render: compare_key},
-    color=compare_key_render,
-)
-fig.update_layout(dragmode="select")
-selected = st.plotly_chart(fig, on_select="rerun")
+
+def plot_targets_grouped(calls, compare_key, target_keys):
+    # compare_vals = calls[compare_key].unique()
+    compare_key_render = compare_key + ".render"
+    compare_val_stats_df = calls.groupby(compare_key).agg(
+        {compare_key_render: "first", **{k: ["mean", "sem"] for k in target_keys}}
+    )
+    compare_val_stats_df.columns = [
+        ".".join(col) for col in compare_val_stats_df.columns
+    ]
+    compare_val_stats_df.rename(
+        {f"{compare_key_render}.first": compare_key_render}, axis=1, inplace=True
+    )
+    compare_val_stats_df[compare_key] = compare_val_stats_df.index
+
+    fig = px.scatter(
+        compare_val_stats_df,
+        x=f"{target_keys[1]}.mean",
+        error_x=f"{target_keys[1]}.sem",
+        y=f"{target_keys[0]}.mean",
+        error_y=f"{target_keys[0]}.sem",
+        custom_data=[compare_key],
+        labels={compare_key_render: compare_key},
+        color=compare_key_render,
+    )
+    fig.update_layout(dragmode="select")
+    return compare_val_stats_df, st.plotly_chart(fig, on_select="rerun")
+
+
+st.header(f"Comparing *{op_obj.object_id}* calls by *{compare_key}*")
+compare_val_stats_df, selected = plot_targets_grouped(calls, compare_key, target_keys)
+
 
 ##### Show the selected points, only 2 for now #####
 
 compare_vals = [p["customdata"][0] for p in selected["selection"]["points"]]
 
-if len(compare_vals) < 2:
-    st.warning("Select at least two points to compare on the chart above")
+if len(compare_vals) < 1:
+    st.warning("Select one or more points on the chart above")
     st.stop()
 
 compare_vals_render = [
@@ -345,16 +357,12 @@ compare_vals_render = [
 ]
 compare_val0 = compare_vals[0]
 compare_val0_render = compare_vals_render[0]
-compare_val1 = compare_vals[1]
-compare_val1_render = compare_vals_render[1]
 
 if is_ref_column(compare_val_stats_df, compare_key):
     # compare_val_stats_df = expand_ref_column(compare_val_stats_df, compare_key)
     expanded_df = expanded_ref_column(compare_val_stats_df, compare_key)
-    compare_vals_df = expanded_df.loc[compare_vals,]
-    with st.expander(
-        f"Comparing **{compare_val0_render}** and **{compare_val1_render}** [First 2 of {len(compare_vals_df)} selected]"
-    ):
+    compare_vals_df = expanded_df.loc[compare_vals]
+    with st.expander(f"Selections"):
         st_write_compare_dict(
             compare_vals_df.to_dict(orient="records")[:2], compare_vals_render[:2]
         )
@@ -363,16 +371,20 @@ if is_ref_column(compare_val_stats_df, compare_key):
 
 st.header(f"Split by *{across_key}*")
 
-model_calls = calls[calls[compare_key].isin([compare_val0, compare_val1])]
+model_calls = calls[calls[compare_key].isin(compare_vals)]
 
 calls = model_calls
 
 # Build a dataframe with one row per across value
 
+
 example_uniqs = calls[across_key].unique()
 example_df = pd.Series(example_uniqs, index=example_uniqs).to_frame(name=across_key)
 if is_ref_column(example_df, across_key):
     example_df = expand_ref_column(example_df, across_key)
+    example_df[across_key_render] = example_df[across_key].apply(parse_ref)
+else:
+    example_df[across_key_render] = example_df[across_key]
 
 
 # Add columns with average value for each target key
@@ -402,41 +414,78 @@ pivot_df = model_preds.pivot(
 example_df = example_df.join(pivot_df)
 
 
-n_plot_cols = 2
-plot_cols = st.columns(n_plot_cols)
-plot_selected_indexes = []
 plot_df = example_df.copy()
 plot_df["index"] = plot_df.index
 plot_df.columns = [".".join((str(c) for c in col if c)) for col in plot_df.columns]
-for i, t in enumerate(target_keys):
-    plot_col = plot_cols[i % n_plot_cols]
-    x_col = f"{t}.{compare_val0}.mean"
-    y_col = f"{t}.{compare_val1}.mean"
-    aggregated_df = plot_df.groupby([x_col, y_col]).size().reset_index(name="count")
-    aggregated_df["index"] = aggregated_df.index
+if len(compare_vals) == 1:
+    n_plot_cols = 2
+    plot_cols = st.columns(n_plot_cols)
+    for i, t in enumerate(target_keys):
+        plot_col = plot_cols[i % n_plot_cols]
+        val_key = f"{t}.{compare_val0}.mean"
+        fig = px.bar(
+            plot_df,
+            x=val_key,
+            y=across_key_render,
+            orientation="h",
+            labels={val_key: t + ".mean"},
+            # error_y=f"{t}.{compare_val0}.sem",
+            # color=compare_key_render,
+            title=t,
+        )
+        plot_col.plotly_chart(fig, dragmode="select")
+elif len(compare_vals) == 1:
+    compare_val1 = compare_vals[1]
+    compare_val1_render = compare_vals_render[1]
 
-    fig = px.scatter(
-        aggregated_df,
-        x=x_col,
-        y=y_col,
-        labels={
-            x_col: compare_val0_render,
-            y_col: compare_val1_render,
-        },
-        size="count",
-        custom_data="index",
-        title=t,
-    )
-    fig.update_layout(dragmode="select")
-    selected = plot_col.plotly_chart(fig, on_select="rerun")
-    selected_indexes = [p["customdata"][0] for p in selected["selection"]["points"]]
+    n_plot_cols = 2
+    plot_cols = st.columns(n_plot_cols)
+    plot_selected_indexes = []
+    for i, t in enumerate(target_keys):
+        plot_col = plot_cols[i % n_plot_cols]
+        x_col = f"{t}.{compare_val0}.mean"
+        y_col = f"{t}.{compare_val1}.mean"
+        aggregated_df = plot_df.groupby([x_col, y_col]).size().reset_index(name="count")
+        aggregated_df["index"] = aggregated_df.index
+
+        fig = px.scatter(
+            aggregated_df,
+            x=x_col,
+            y=y_col,
+            labels={
+                x_col: compare_val0_render,
+                y_col: compare_val1_render,
+            },
+            size="count",
+            custom_data="index",
+            title=t,
+        )
+        fig.update_layout(dragmode="select")
+        selected = plot_col.plotly_chart(fig, on_select="rerun", selection_mode="box")
+        selected_indexes = [p["customdata"][0] for p in selected["selection"]["points"]]
+        if selected_indexes:
+            selected = aggregated_df.iloc[selected_indexes]
+            plot_df = plot_df.merge(selected[[x_col, y_col]], on=[x_col, y_col])
+else:
+    compare_val1 = compare_vals[1]
+    compare_val1_render = compare_vals_render[1]
+    aggregated_df, selected_plot = plot_targets_grouped(calls, across_key, target_keys)
+    selected_indexes = [
+        p["customdata"][0] for p in selected_plot["selection"]["points"]
+    ]
     if selected_indexes:
-        selected = aggregated_df.iloc[selected_indexes]
-        plot_df = plot_df.merge(selected[[x_col, y_col]], on=[x_col, y_col])
+        plot_df = plot_df.loc[selected_indexes]
 
 safe_plot_df = st_safe_df(plot_df)
+across_target_df = safe_plot_df[[across_key_render]]
+for compare_val in compare_vals:
+    for target_key in target_keys:
+        mean_col = f"{target_key}.{compare_val}.mean"
+        mean_col_render = f"{target_key}.{parse_ref(compare_val)}.mean"
+        across_target_df[mean_col_render] = safe_plot_df[mean_col]
+across_target_df.index = safe_plot_df[across_key_render]
 row_selection = st.dataframe(
-    safe_plot_df, on_select="rerun", selection_mode="single-row"
+    across_target_df, on_select="rerun", selection_mode="single-row"
 )
 
 selected_rows = row_selection["selection"]["rows"]
@@ -460,6 +509,14 @@ with st.expander("input value"):
 
 
 st.subheader("output")
+
+# selected_row
+
+if len(compare_vals) == 1:
+    for index in selected_row.index.get_level_values(2).unique():
+        st.subheader(index, divider=True)
+        st_write_dict(selected_row.loc[(slice(None), compare_val0, index)].dropna())
+    st.stop()
 
 col1, col2 = st.columns(2)
 with col1:
