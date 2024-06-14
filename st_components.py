@@ -5,6 +5,7 @@ import streamlit as st
 import json
 import query
 import weave
+import numpy as np
 
 
 def nice_ref(x):
@@ -165,6 +166,47 @@ def st_scatter_pivotxy_mean_histo(
 
     selected = st_xy_histo(pivot_df, x_key=x, y_key=y)
     return selected
+
+
+def st_n_histos(df: pd.DataFrame, compare_key: str, n_key: str, x_key: str):
+    figs = []
+    num_bins = 20
+
+    bin_edges = np.histogram_bin_edges(df[x_key].dropna(), bins=num_bins)
+    n_fs = []
+    hists = []
+    for n_val in df[n_key].unique():
+        n_df = df[df[n_key] == n_val]
+        n_fs.append(n_df)
+        hist = np.histogram(n_df[x_key], bins=bin_edges)
+        hists.append(hist)
+    max_y = max(hist[0].max() for hist in hists)
+    for n_df, hist in zip(n_fs, hists):
+        compare_val_stats_df = n_df.groupby(compare_key).agg({x_key: ["mean", "sem"]})
+        compare_val_stats_df.columns = [
+            ".".join(col) for col in compare_val_stats_df.columns
+        ]
+        compare_key_render = compare_key + ".render"
+        compare_val_stats_df[compare_key_render] = compare_val_stats_df.index.map(
+            nice_ref
+        )
+        compare_val_stats_df[compare_key] = compare_val_stats_df.index
+
+        fig = px.histogram(
+            compare_val_stats_df,
+            x=f"{x_key}.mean",
+            nbins=num_bins,
+            range_y=(0, max_y),
+        )
+        fig.update_layout(dragmode="select")
+        figs.append(fig)
+
+    return figs
+
+    selected = st.plotly_chart(fig, on_select="rerun")
+    selected_vals = [p["customdata"][0] for p in selected["selection"]["points"]]
+
+    return compare_val_stats_df, selected_vals
 
 
 def st_dict(d):

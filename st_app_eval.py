@@ -10,6 +10,7 @@ from st_components import (
     st_scatter_plot_mean,
     st_barplot_plot_mean,
     st_scatter_pivotxy_mean_histo,
+    st_n_histos,
     st_dict,
     st_compare_dict,
 )
@@ -85,19 +86,23 @@ st.header(f"Comparing *{op.name}* calls by *{compare_key}*")
 compare_val_stats_df, compare_vals = st_scatter_plot_mean(
     calls, compare_key, target_keys[1], target_keys[0]
 )
-
-
 if len(compare_vals) < 1:
     st.warning("Select one or more points on the chart above")
     st.stop()
+if len(compare_vals) > 2:
+    st.warning("We recommend selecting two points, for a more specific comparison")
+
 
 if query.is_ref_series(compare_val_stats_df[compare_key]):
     expanded_df = query.resolve_refs(project_name, compare_val_stats_df[compare_key])
     compare_vals_df = expanded_df.loc[compare_vals]
     with st.expander(f"{len(compare_vals)} {compare_key} values"):
-        st_compare_dict(
-            compare_vals_df.to_dict(orient="records")[:2], compare_vals_df.index
-        )
+        if len(compare_vals_df) > 1:
+            st_compare_dict(
+                compare_vals_df.to_dict(orient="records"), compare_vals_df.index
+            )
+        else:
+            st_dict(compare_vals_df.iloc[0])
 
 ##### Second level comparison by across_key #####
 
@@ -112,7 +117,7 @@ if len(compare_vals) == 1:
         plot_col = plot_cols[i % n_plot_cols]
         with plot_col:
             st_barplot_plot_mean(calls, across_key, t)
-elif len(compare_vals) >= 2:
+elif len(compare_vals) == 2:
     n_plot_cols = 2
     plot_cols = st.columns(n_plot_cols)
     plot_selected_indexes = []
@@ -123,14 +128,39 @@ elif len(compare_vals) >= 2:
             if len(selected):
                 calls = calls[calls[across_key].isin(selected)]
 else:
-    compare_val1 = compare_vals[1]
-    compare_val1_render = compare_vals_render[1]
-    aggregated_df, selected_plot = plot_targets_grouped(calls, across_key, target_keys)
-    selected_indexes = [
-        p["customdata"][0] for p in selected_plot["selection"]["points"]
-    ]
-    if selected_indexes:
-        plot_df = plot_df.loc[selected_indexes]
+    _, across_vals = st_scatter_plot_mean(
+        calls, across_key, target_keys[1], target_keys[0]
+    )
+    if len(across_vals):
+        calls = calls[calls[across_key].isin(across_vals)]
+    # for t in target_keys:
+    #     t
+    #     figs = st_n_histos(calls, across_key, compare_key, t)
+    #     cols = st.columns(len(figs))
+    #     for i, fig in enumerate(figs):
+    #         with cols[i]:
+    #             st.plotly_chart(fig, on_select="rerun")
+
+    # cols = st.columns(len(compare_vals))
+    # for i, c in enumerate(compare_vals):
+    #     with cols[i]:
+    #         st.write(st_safe_val(nice_ref(c)))
+
+    # for c in compare_vals:
+    #     st.write(c)
+    #     cols = st.columns(len(target_keys))
+    #     for i, t in enumerate(target_keys):
+    #         with cols[i]:
+    #             st_barplot_plot_mean(calls[calls[compare_key] == c], across_key, t)
+
+    # for t in target_keys:
+
+    # for t in target_keys:
+    #     cols = st.columns(len(compare_vals))
+    #     for i, c in enumerate(compare_vals):
+    #         with cols[i]:
+    #             st_barplot_plot_mean(calls[calls[compare_key] == c], across_key, t)
+    #     # st_barplot_plot_mean(calls, across_key, t)
 
 # Show a pivot across all target_keys
 across_target_df = calls.pivot_table(
@@ -174,4 +204,7 @@ for i in range(max_len):
         partitions[k].iloc[i].dropna() if i < len(partitions[k]) else {}
         for k in partitions
     ]
-    st_compare_dict(vals, partitions.keys(), st_key=f"compare-{i}")
+    if len(vals) > 1:
+        st_compare_dict(vals, partitions.keys(), st_key=f"compare-{i}")
+    else:
+        st_dict(vals[0])
