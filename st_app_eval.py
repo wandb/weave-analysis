@@ -32,14 +32,14 @@ with st.sidebar:
         ),
     )
     if op is None:
-        st.warning("no ops available")
+        st.warning("No ops available. Please type in a project name!")
         st.stop()
 
     calls2 = query.get_calls(project_name, op.name)
     calls = calls2.df
 
     compare_key = st_wv_column_selectbox(
-        "A / B compare",
+        "Compare",
         calls2,
         op_types=("str",),
         sort_key=lambda col: (
@@ -52,6 +52,16 @@ with st.sidebar:
         st.warning("no compare keys available")
         st.stop()
 
+    def default_target_keys(cols):
+        # Move model_latency to second position by default, and select the
+        # first two.
+        cols = list(cols)
+        model_latency_index = cols.index("output.model_latency")
+        if model_latency_index != -1:
+            cols.pop(model_latency_index)
+            cols.insert(1, "output.model_latency")
+        return cols[:2]
+
     target_keys = st_wv_column_multiselect(
         "Target",
         calls2,
@@ -61,6 +71,7 @@ with st.sidebar:
             not col.name.startswith("outputs."),
             col.name,
         ),
+        default=default_target_keys,
     )
 
     across_key = st_wv_column_selectbox(
@@ -133,34 +144,6 @@ else:
     )
     if len(across_vals):
         calls = calls[calls[across_key].isin(across_vals)]
-    # for t in target_keys:
-    #     t
-    #     figs = st_n_histos(calls, across_key, compare_key, t)
-    #     cols = st.columns(len(figs))
-    #     for i, fig in enumerate(figs):
-    #         with cols[i]:
-    #             st.plotly_chart(fig, on_select="rerun")
-
-    # cols = st.columns(len(compare_vals))
-    # for i, c in enumerate(compare_vals):
-    #     with cols[i]:
-    #         st.write(st_safe_val(nice_ref(c)))
-
-    # for c in compare_vals:
-    #     st.write(c)
-    #     cols = st.columns(len(target_keys))
-    #     for i, t in enumerate(target_keys):
-    #         with cols[i]:
-    #             st_barplot_plot_mean(calls[calls[compare_key] == c], across_key, t)
-
-    # for t in target_keys:
-
-    # for t in target_keys:
-    #     cols = st.columns(len(compare_vals))
-    #     for i, c in enumerate(compare_vals):
-    #         with cols[i]:
-    #             st_barplot_plot_mean(calls[calls[compare_key] == c], across_key, t)
-    #     # st_barplot_plot_mean(calls, across_key, t)
 
 # Show a pivot across all target_keys
 across_target_df = calls.pivot_table(

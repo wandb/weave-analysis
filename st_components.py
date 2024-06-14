@@ -73,10 +73,13 @@ def st_wv_column_multiselect(
     calls: query.Calls,
     op_types: Optional[Sequence[str]] = None,
     sort_key: Optional[Callable[[query.Column], Any]] = None,
+    default: Optional[Callable[[Sequence[str]], Any]] = None,
 ):
     ordered_compare_cols = calls.columns(op_types=op_types, sort_key=sort_key)
     ordered_compare_column_names = [col.name for col in ordered_compare_cols]
-    return st.multiselect(label, ordered_compare_column_names)
+    if default is not None:
+        default_val = default(ordered_compare_column_names)
+    return st.multiselect(label, ordered_compare_column_names, default=default_val)
 
 
 def st_scatter_plot_mean(df: pd.DataFrame, compare_key: str, x_key: str, y_key: str):
@@ -202,11 +205,6 @@ def st_n_histos(df: pd.DataFrame, compare_key: str, n_key: str, x_key: str):
         figs.append(fig)
 
     return figs
-
-    selected = st.plotly_chart(fig, on_select="rerun")
-    selected_vals = [p["customdata"][0] for p in selected["selection"]["points"]]
-
-    return compare_val_stats_df, selected_vals
 
 
 def st_dict(d):
