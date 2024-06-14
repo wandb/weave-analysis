@@ -226,6 +226,29 @@ def st_dict(d):
             st.write(f"**{key}**", value)
 
 
+def st_multi_dict(dicts, headers):
+    keys = {}
+    for d in dicts:
+        for k in d.keys():
+            keys[k] = True
+    keys = list(keys)
+
+    cols = st.columns([1] + [2] * len(dicts))
+    cols_iter = iter(cols)
+    col0 = next(cols_iter)
+    for col, value in zip(cols_iter, headers):
+        value = nice_ref(value).replace(":", "\\:")
+        col.write(f"**{value}**")
+
+    for key in keys:
+        cols = st.columns([1] + [2] * len(dicts))
+        cols_iter = iter(cols)
+        col0 = next(cols_iter)
+        col0.write(f"**{key}**")
+        for col, value in zip(cols_iter, [d.get(key, None) for d in dicts]):
+            col.write(value)
+
+
 def st_compare_dict(dicts, headers, st_key="compare"):
     keys = {}
     for d in dicts:

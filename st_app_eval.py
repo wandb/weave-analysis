@@ -13,6 +13,7 @@ from st_components import (
     st_n_histos,
     st_dict,
     st_compare_dict,
+    st_multi_dict,
 )
 
 st.set_page_config(layout="wide")
@@ -75,7 +76,6 @@ with st.sidebar:
     if across_key is None:
         st.warning("no across keys available")
         st.stop()
-
 
 if len(target_keys) < 2:
     st.warning("Select at least two target keys")
@@ -205,6 +205,6 @@ for i in range(max_len):
         for k in partitions
     ]
     if len(vals) > 1:
-        st_compare_dict(vals, partitions.keys(), st_key=f"compare-{i}")
+        st_multi_dict(vals, partitions.keys())
     else:
         st_dict(vals[0])

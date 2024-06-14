@@ -126,4 +126,16 @@ def get_calls(project_name, op_name):
         }
         for c in weave_client_calls(client, op_name)
     ]
-    return Calls(pd.json_normalize(call_list))
+    df = pd.json_normalize(call_list)
+
+    # Merge the usage columns, removing the model component
+    usage_columns = [col for col in df.columns if col.startswith("summary.usage")]
+    renamed_columns = [
+        ".".join(col.split(".")[:2] + col.split(".")[3:]) for col in usage_columns
+    ]
+    df_renamed = df[usage_columns].copy()
+    df_renamed.columns = renamed_columns
+    df_summed = df_renamed.groupby(axis=1, level=0).sum()
+    df_final = df.drop(columns=usage_columns).join(df_summed)
+
+    return Calls(df_final)
