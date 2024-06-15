@@ -135,7 +135,9 @@ elif len(compare_vals) == 2:
     for i, t in enumerate(target_keys):
         plot_col = plot_cols[i % n_plot_cols]
         with plot_col:
-            selected = st_scatter_pivotxy_mean_histo(calls, across_key, compare_key, t)
+            selected = st_scatter_pivotxy_mean_histo(
+                calls, across_key, compare_key, t, compare_vals[1], compare_vals[0]
+            )
             if len(selected):
                 calls = calls[calls[across_key].isin(selected)]
 else:
@@ -149,18 +151,19 @@ else:
 across_target_df = calls.pivot_table(
     index=across_key, columns=compare_key, values=target_keys, aggfunc="mean"
 )
-across_target_df.columns = across_target_df.columns.set_levels(
-    across_target_df.columns.levels[1].map(nice_ref), level=1
-)
-across_target_df.columns = [
-    ".".join((str(c) for c in col if c)) for col in across_target_df.columns
-]
 across_vals = across_target_df.index.to_series()
 if query.is_ref_series(across_vals):
     across_vals = query.resolve_refs(project_name, across_vals)
 
+across_target_df_display = across_target_df.copy()
+across_target_df_display.insert(0, across_key, across_target_df.index.map(nice_ref))
+across_target_df_display.reset_index(drop=True, inplace=True)
+across_target_df_display.columns = across_target_df_display.columns.set_levels(
+    across_target_df_display.columns.levels[1].map(nice_ref), level=1
+)
+
 row_selection = st.dataframe(
-    across_target_df, on_select="rerun", selection_mode="single-row"
+    across_target_df_display, on_select="rerun", selection_mode="single-row"
 )
 
 selected_rows = row_selection["selection"]["rows"]
@@ -168,10 +171,12 @@ if not selected_rows:
     st.warning("Select a row to view details.")
     st.stop()
 
-across_selected_val = across_target_df.index[selected_rows[0]]
+# Stupid, we need a minus one because streamlit displays the multi-level
+# index as a row.
+across_selected_val = across_target_df.index[selected_rows[0] - 1]
 calls = calls[calls[across_key] == across_selected_val]
 # across_val_resolved = query.resolve_refs(project_name, [across_selected_val]).iloc[0]
-with st.expander(st_safe_val(nice_ref(across_selected_val))):
+with st.expander(across_key + ": " + st_safe_val(nice_ref(across_selected_val))):
     st_dict(across_vals.loc[across_selected_val].to_dict())
 
 

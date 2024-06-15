@@ -160,14 +160,18 @@ def st_xy_histo(df: pd.DataFrame, x_key: str, y_key: str):
 
 
 def st_scatter_pivotxy_mean_histo(
-    df: pd.DataFrame, compare_key: str, pivot_key: str, value_key: str
+    df: pd.DataFrame,
+    compare_key: str,
+    pivot_key: str,
+    value_key: str,
+    x_key: str,
+    y_key: str,
 ):
     pivot_df = df.pivot_table(
         index=compare_key, columns=pivot_key, values=value_key, aggfunc="mean"
     )
-    x, y = pivot_df.columns[:2]
 
-    selected = st_xy_histo(pivot_df, x_key=x, y_key=y)
+    selected = st_xy_histo(pivot_df, x_key=x_key, y_key=y_key)
     return selected
 
 
