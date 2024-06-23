@@ -45,11 +45,11 @@ def st_safe_df(df):
 
 
 def st_op_selectbox(
-    project_name: str,
+    client,
     label: str,
     sort_key: Optional[Callable[[query.Op], Any]] = None,
 ):
-    ops = query.get_ops(project_name)
+    ops = query.get_ops(client)
     if sort_key:
         ops = sorted(ops, key=sort_key)
     return st.selectbox(
@@ -135,7 +135,7 @@ def st_barplot_plot_mean(df: pd.DataFrame, compare_key: str, x_key: str):
     return compare_val_stats_df, selected_vals
 
 
-def st_xy_histo(df: pd.DataFrame, x_key: str, y_key: str):
+def st_xy_histo(df: pd.DataFrame, x_key: str, y_key: str, title: str):
     histo_df = df.groupby([x_key, y_key]).size().reset_index(name="count")
     histo_df["index"] = histo_df.index
     fig = px.scatter(
@@ -148,7 +148,7 @@ def st_xy_histo(df: pd.DataFrame, x_key: str, y_key: str):
         },
         size="count",
         custom_data="index",
-        # title=t,
+        title=title,
     )
     fig.update_layout(dragmode="select")
     selected = st.plotly_chart(fig, on_select="rerun", selection_mode="box")
@@ -166,12 +166,13 @@ def st_scatter_pivotxy_mean_histo(
     value_key: str,
     x_key: str,
     y_key: str,
+    title: str,
 ):
     pivot_df = df.pivot_table(
         index=compare_key, columns=pivot_key, values=value_key, aggfunc="mean"
     )
 
-    selected = st_xy_histo(pivot_df, x_key=x_key, y_key=y_key)
+    selected = st_xy_histo(pivot_df, x_key=x_key, y_key=y_key, title=title)
     return selected
 
 
@@ -211,7 +212,10 @@ def st_n_histos(df: pd.DataFrame, compare_key: str, n_key: str, x_key: str):
     return figs
 
 
-def st_dict(d):
+def st_dict(d, header=None):
+    if header:
+        header_val = nice_ref(header).replace(":", "\\:")
+        st.write(f"**{header_val}**")
     for key, value in d.items():
         if isinstance(value, str):
             st.write(f"**{key}**")

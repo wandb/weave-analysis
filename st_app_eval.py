@@ -136,7 +136,7 @@ elif len(compare_vals) == 2:
         plot_col = plot_cols[i % n_plot_cols]
         with plot_col:
             selected = st_scatter_pivotxy_mean_histo(
-                calls, across_key, compare_key, t, compare_vals[1], compare_vals[0]
+                calls, across_key, compare_key, t, compare_vals[1], compare_vals[0], t
             )
             if len(selected):
                 calls = calls[calls[across_key].isin(selected)]

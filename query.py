@@ -4,8 +4,16 @@ import pandas as pd
 import weave
 import streamlit as st
 import math
+from weave.trace.refs import ObjectRef
 
-from weave_api_next import weave_client_ops, weave_client_calls, weave_client_get_batch
+from pandas_util import pd_apply_and_insert
+
+from weave_api_next import (
+    weave_client_ops,
+    weave_client_calls,
+    weave_client_get_batch,
+    weave_client_objs,
+)
 
 
 def simple_val(v):
@@ -23,6 +31,23 @@ def simple_val(v):
 
 def is_ref_series(series: pd.Series):
     return series.str.startswith("weave://").any()
+
+
+def split_obj_ref(series: pd.Series):
+    expanded = series.str.split("/", expand=True)
+    name_version = expanded[6].str.split(":", expand=True)
+    result = pd.DataFrame(
+        {
+            "entity": expanded[3],
+            "project": expanded[4],
+            "kind": expanded[5],
+            "name": name_version[0],
+            "version": name_version[1],
+        }
+    )
+    if len(expanded.columns) > 7:
+        result["path"] = pd_col_join(expanded.loc[:, expanded.columns > 6], "/")
+    return result
 
 
 @st.cache_data()
@@ -44,10 +69,32 @@ class Op:
 
 
 @st.cache_data()
-def get_ops(project_name):
-    client = weave.init(project_name)
-    client_ops = weave_client_ops(client)
+def get_ops(_client):
+    # client = weave.init(project_name)
+    client_ops = weave_client_ops(_client)
     return [Op(op.object_id, op.version_index) for op in client_ops]
+
+
+@dataclass
+class Objs:
+    df: pd.DataFrame
+
+
+@st.cache_data()
+def get_objs(_client, types=None):
+    # client = weave.init(project_name)
+    client_objs = weave_client_objs(_client, types=types)
+    refs = []
+    objs = []
+    for v in client_objs:
+        entity, project = v.project_id.split("/", 1)
+        refs.append(ObjectRef(entity, project, v.object_id, v.digest).uri())
+        objs.append(v.val)
+        # TODO there is other metadata like created at
+    df = pd.json_normalize([simple_val(v) for v in objs])
+    df.index = refs
+    return df
+    # return [Op(op.object_id, op.version_index) for op in client_ops]
 
 
 def friendly_dtypes(df):
@@ -106,17 +153,18 @@ class Calls:
         return cols
 
 
-@st.cache_data()
-def get_calls(project_name, op_name):
-    client = weave.init(project_name)
+# @st.cache_data()
+def get_calls(_client, op_name, input_refs=None, cache_key=None):
     call_list = [
         {
             "id": c.id,
             "trace_id": c.trace_id,
             "parent_id": c.parent_id,
+            "op_name": c.op_name,
             "inputs": {
                 k: v.uri() if hasattr(v, "uri") else v for k, v in c.inputs.items()
             },
+            "input_refs": c.input_refs,
             "output": c.output,
             "exception": c.exception,
             # "attributes": c.attributes,
@@ -124,9 +172,13 @@ def get_calls(project_name, op_name):
             # "started_at": c.started_at,
             # "ended_at": c.ended_at,
         }
-        for c in weave_client_calls(client, op_name)
+        for c in weave_client_calls(_client, op_name, input_refs)
     ]
     df = pd.json_normalize(call_list)
+
+    if df.empty:
+        return Calls(df)
+    df = pd_apply_and_insert(df, "op_name", split_obj_ref)
 
     # Merge the usage columns, removing the model component
     usage_columns = [col for col in df.columns if col.startswith("summary.usage")]
