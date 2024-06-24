@@ -221,6 +221,7 @@ class WeaveResultCache:
 
         # Prepare the calls DataFrame
         calls_df = calls.df.astype(str)
+        calls_df["call_index"] = calls.df.index
 
         # Prepare the op_configs DataFrame
         op_configs_df_normalized = pd.json_normalize(
@@ -244,7 +245,11 @@ class WeaveResultCache:
             if "both" in group["_merge"].values:
                 # If there's at least one match, use the first match
                 match_row = group[group["_merge"] == "both"].iloc[0]
-                results[int(index)] = get_unflat_value(match_row, "output")
+                call_index = match_row["call_index"]
+                results[int(index)] = get_unflat_value(
+                    calls.df.loc[call_index], "output"
+                )
+                # results[int(index)] = get_unflat_value(match_row, "output")
 
         return results
 
@@ -253,11 +258,15 @@ class WeaveResultCache:
 
 
 class ComputeTable:
-    def __init__(self, initial_inputs: Optional[list] = None, trials: int = 1) -> None:
+    def __init__(
+        self, initial_inputs: Optional[list] = None, trials: int = 1, limit=None
+    ) -> None:
         self.result_cache = WeaveResultCache()
         self.columns = {}
         self.rows = []
         if initial_inputs:
+            if limit:
+                initial_inputs = initial_inputs[:limit]
             for k in initial_inputs[0]:
                 self.add_input(k)
             if trials > 1:

@@ -57,17 +57,22 @@ if uploaded_file:
 
 objs = client.objects()
 datasets = [f"{o.val.get('name')}:{o.digest}" for o in objs]
-dataset_name_v = st.selectbox("Dataset", datasets)
+col_a, col_b = st.columns(2)
+with col_a:
+    dataset_name_v = st.selectbox("Dataset", datasets)
+with col_b:
+    limit = st.number_input("Limit", min_value=0, value=10)
 if not dataset_name_v:
     st.stop()
 with set_graph_client(client):
     dataset = weave.ref(dataset_name_v).get()
 
-    ct = new_api.ComputeTable(dataset.rows)
+    ct = new_api.ComputeTable(dataset.rows, limit=limit)
 
     ds_rows = list(dataset.rows)
     ds_rows_refs = [row.ref.uri() for row in ds_rows]
     ds_df = pd.DataFrame(ds_rows, index=ds_rows_refs)
+
 
 ##### Infer compute table from using_calls
 
@@ -124,6 +129,27 @@ sel = st.dataframe(
     hide_index=True,
     use_container_width=True,
 )
+
+
+ct_status = ct.status()
+total_to_run = sum(op_status["not_computed"] for op_status in ct_status.values())
+
+if st.button(f"Fill {total_to_run} blanks"):
+    op_strings = [
+        f'{op_name} ({op_status["not_computed"]})'
+        for op_name, op_status in ct_status.items()
+    ]
+    op_string = ", ".join(op_strings)
+    my_bar = st.progress(0, text=op_string)
+    with set_graph_client(client):
+        for i, cell_result in enumerate(ct.execute()):
+            op_strings = [
+                f'{op_name} ({op_status["not_computed"]})'
+                for op_name, op_status in ct_status.items()
+            ]
+            op_string = ", ".join(op_strings)
+            my_bar.progress((i + 1) / total_to_run, text=op_string)
+    st.rerun()
 
 
 ##### Individual row view.
@@ -224,9 +250,11 @@ if sel_rows:
                         op_calls_df["op_name.version"] == version
                     ]
                     if len(op_version_calls) > 0:
-                        value = get_unflat_value(op_version_calls.iloc[-1], "output")
+                        value = get_unflat_value(
+                            op_version_calls.iloc[0].dropna(), "output"
+                        )
                         op_sel = st.dataframe(
-                            op_version_calls.filter(regex=f"^output"),
+                            op_version_calls.filter(regex=f"^(inputs|output)"),
                             use_container_width=True,
                             selection_mode="single-row",
                             on_select="rerun",

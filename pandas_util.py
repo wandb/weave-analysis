@@ -33,6 +33,9 @@ def find_rows_with_vals(df, vals_df):
 
 
 def get_unflat_value(series: pd.Series, key_prefix: str):
+    # TODO: this drops None which is no good
+    series = series.dropna()
+
     # Exact match
     if key_prefix in series.index:
         return series[key_prefix]
