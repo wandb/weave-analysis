@@ -6,6 +6,15 @@ import json
 import query
 import weave
 import numpy as np
+from code_editor import code_editor
+from weave.graph_client_context import set_graph_client
+from weave.trace_server.trace_server_interface import (
+    FileContentReadReq,
+    ObjReadReq,
+)
+from weave.trace.custom_objs import MemTraceFilesArtifact
+from weave.trace import op_type
+from weave.trace.refs import OpRef
 
 
 def nice_ref(x):
@@ -295,3 +304,55 @@ def st_compare_dict(dicts, headers, st_key="compare"):
             cols = st.columns((1, 2 * len(dicts)))
             cols[0].write(f"**{key}**")
             cols[1].write(dicts[0].get(key))
+
+
+def op_code_editor(client, op_code: str):
+    with set_graph_client(client):
+        response_dict = code_editor(op_code)
+        if response_dict["text"]:
+            op_code = response_dict["text"]
+        exec_locals = {}
+        exec(op_code, globals(), exec_locals)
+        art = MemTraceFilesArtifact({"obj.py": op_code.encode()})
+        fn = op_type.load_instance(art, "obj")
+
+        # Attach art to fn to keep it around in memory, so we can
+        # actually read the code file when we go to save!
+        fn.art = art
+    return fn
+
+
+def op_version_editor(client, op_name, version):
+    fn = None
+    with set_graph_client(client):
+        server_read = client.server.obj_read(
+            ObjReadReq(
+                project_id=client._project_id(), object_id=op_name, digest=version
+            )
+        )
+        code_file_digest = server_read.obj.val["files"]["obj.py"]
+        code_file_contents = client.server.file_content_read(
+            FileContentReadReq(project_id=client._project_id(), digest=code_file_digest)
+        ).content.decode()
+        fn = op_code_editor(client, code_file_contents)
+
+    return fn
+
+
+@st.cache_resource
+def init_local_weave():
+    return weave.init_local_client()
+
+
+@st.cache_resource
+def init_remote_weave(project: str):
+    return weave.init(project)
+
+
+def st_project_picker():
+    source = st.radio("project source", ["local", "wandb"])
+    if source == "wandb":
+        project_name = st.text_input("project name")
+        return init_remote_weave(project_name)
+    else:
+        return init_local_weave()

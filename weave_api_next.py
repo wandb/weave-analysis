@@ -2,12 +2,14 @@
 # But its here for now so we can iterate on finding the right patterns.
 
 import dataclasses
+import datetime
 from typing import cast, Optional, Union, Iterator, Sequence, Any
 from weave.weave_client import WeaveClient, from_json
 from weave import urls
 from weave.trace_server.trace_server_interface import (
     ObjSchema,
     ObjQueryReq,
+    ObjQueryRes,
     _ObjectVersionFilter,
     _CallsFilter,
     CallsQueryReq,
@@ -23,6 +25,8 @@ from weave import graph_client_context
 @dataclasses.dataclass
 class Call:
     op_name: str
+    started_at: datetime.datetime
+    ended_at: Optional[datetime.datetime]
     trace_id: str
     project_id: str
     parent_id: Optional[str]
@@ -71,6 +75,8 @@ def make_client_call(
     inputs = from_json(server_call.inputs, server_call.project_id, server)
     call = Call(
         op_name=server_call.op_name,
+        started_at=server_call.started_at,
+        ended_at=server_call.ended_at,
         project_id=server_call.project_id,
         trace_id=server_call.trace_id,
         parent_id=server_call.parent_id,
@@ -148,16 +154,20 @@ def weave_client_calls(self: WeaveClient, op_names, input_refs=None) -> CallsIte
 
 
 def weave_client_ops(
-    self: WeaveClient, filter: Optional[_ObjectVersionFilter] = None
+    self: WeaveClient,
+    filter: Optional[_ObjectVersionFilter] = None,
+    latest_only=False,
+    id=None,
 ) -> list[ObjSchema]:
     if not filter:
         filter = _ObjectVersionFilter()
     else:
         filter = filter.model_copy()
     filter = cast(_ObjectVersionFilter, filter)
-    # TODO: fetches latest_only. Need to be more general.
-    filter.latest_only = True
+    filter.latest_only = latest_only
     filter.is_op = True
+    if id:
+        filter.object_ids = [id]
 
     response = self.server.objs_query(
         ObjQueryReq(
@@ -165,6 +175,16 @@ def weave_client_ops(
             filter=filter,
         )
     )
+    # latest_only is broken in sqlite implementation, so do it here.
+    if latest_only:
+        latest_objs = {}
+        for obj in response.objs:
+            prev_obj = latest_objs.get(obj.object_id)
+            if prev_obj and prev_obj.version_index > obj.version_index:
+                continue
+            latest_objs[obj.object_id] = obj
+        response = ObjQueryRes(objs=list(latest_objs.values()))
+
     return response.objs
 
 

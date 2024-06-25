@@ -4,7 +4,7 @@ import pandas as pd
 import weave
 import streamlit as st
 import math
-from weave.trace.refs import ObjectRef
+from weave.trace.refs import ObjectRef, OpRef
 
 from pandas_util import pd_apply_and_insert
 
@@ -64,15 +64,39 @@ def resolve_refs(project_name, refs):
 
 @dataclass
 class Op:
+    project_id: str
     name: str
+    digest: str
     version_index: int
+    call_count: Optional[int] = None
+
+    def ref(self):
+        entity_id, project_id = self.project_id.split("/", 1)
+        return OpRef(entity_id, project_id, self.name, self.digest)
 
 
-@st.cache_data()
 def get_ops(_client):
     # client = weave.init(project_name)
-    client_ops = weave_client_ops(_client)
-    return [Op(op.object_id, op.version_index) for op in client_ops]
+    client_ops = weave_client_ops(_client, latest_only=True)
+    return [
+        Op(op.project_id, op.object_id, op.digest, op.version_index)
+        for op in client_ops
+    ]
+
+
+def get_op_versions(_client, id, include_call_counts=False):
+    client_ops = weave_client_ops(_client, id=id)
+    ops = [
+        Op(op.project_id, op.object_id, op.digest, op.version_index)
+        for op in client_ops
+    ]
+    if include_call_counts:
+        calls = get_calls(_client, [o.ref().uri() for o in ops])
+        counts = calls.df.groupby("op_name").size()
+        for op in ops:
+            op.call_count = counts.get(op.ref().uri())
+
+    return list(reversed(ops))
 
 
 @dataclass
@@ -160,6 +184,7 @@ def get_calls(_client, op_name, input_refs=None, cache_key=None):
             "id": c.id,
             "trace_id": c.trace_id,
             "parent_id": c.parent_id,
+            "started_at": c.started_at,
             "op_name": c.op_name,
             "inputs": {
                 k: v.uri() if hasattr(v, "uri") else v for k, v in c.inputs.items()
