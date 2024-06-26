@@ -19,7 +19,7 @@ from weave.trace_server.trace_server_interface import (
 )
 from weave.trace_server.trace_server_interface_util import extract_refs_from_values
 from weave.trace.vals import TraceObject
-from weave import graph_client_context
+from weave import weave_client
 
 
 @dataclasses.dataclass
@@ -51,7 +51,7 @@ class Call:
 
     # These are the children if we're using Call at read-time
     def children(self) -> "CallsIter":
-        client = graph_client_context.require_graph_client()
+        client = weave_client.require_graph_client()
         if not self.id:
             raise ValueError("Can't get children of call without ID")
         return CallsIter(
@@ -61,7 +61,7 @@ class Call:
         )
 
     def delete(self) -> bool:
-        client = graph_client_context.require_graph_client()
+        client = weave_client.require_graph_client()
         return client.delete_call(call=self)
 
 

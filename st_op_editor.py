@@ -1,7 +1,6 @@
 import streamlit as st
 from typing import Callable
 import inspect
-from weave.graph_client_context import set_graph_client
 from pandas_util import *
 
 import query
@@ -48,8 +47,7 @@ if sel_op is None:
     with st.form("run_op"):
         params = {k: st.text_input(k) for k in op_param_names}
         if st.form_submit_button("Run Op"):
-            with set_graph_client(client):
-                result = op_fn(**params)
+            result = op_fn(**params)
 
     st.stop()
 
@@ -113,14 +111,13 @@ with st.form("run_op"):
     params = {k: st.text_input(k) for k in common_param_names}
     if st.form_submit_button("Run Op"):
         cols = st.columns(len(compare_columns))
-        with set_graph_client(client):
-            for col, op_ref, op_fn in zip(cols, op_refs, op_fns):
-                if op_fn is None:
-                    op_fn = op_ref.get()
-                result = op_fn(**params)
-                with col:
-                    result
-            # st.rerun()
+        for col, op_ref, op_fn in zip(cols, op_refs, op_fns):
+            if op_fn is None:
+                op_fn = op_ref.get()
+            result = op_fn(**params)
+            with col:
+                result
+            st.rerun()
 cols = st.columns(len(compare_columns))
 for col, op_ref in zip(cols, op_refs):
     with col:
