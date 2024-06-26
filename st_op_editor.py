@@ -1,12 +1,7 @@
 import streamlit as st
 from typing import Callable
 import inspect
-import pandas as pd
-import weave
 from weave.graph_client_context import set_graph_client
-from weave.trace_server.trace_server_interface import (
-    ObjReadReq,
-)
 from pandas_util import *
 
 import query
@@ -16,6 +11,7 @@ from st_components import (
     op_version_editor,
     st_project_picker,
     op_code_editor,
+    st_safe_val,
 )
 
 st.set_page_config(layout="wide")
@@ -24,11 +20,6 @@ st.set_page_config(layout="wide")
 def get_op_param_names(op: Callable):
     sig = inspect.signature(op)
     return list(sig.parameters.keys())
-
-
-@st.cache_resource
-def init_weave():
-    return weave.init_local_client()
 
 
 DEFAULT_NEW_OP_CODE = """import weave
@@ -44,8 +35,6 @@ def describe(value):
     )
     return response.choices[0].message.content"""
 
-
-client = init_weave()
 
 with st.sidebar:
     client = st_project_picker()
@@ -76,12 +65,7 @@ with st.sidebar:
 
         def update_checkbox(digest):
             turn_on = not st.session_state.version_checked.get(digest, False)
-            if turn_on:
-                st.session_state.version_checked = {
-                    version.digest: digest == version.digest for version in versions
-                }
-            else:
-                st.session_state.version_checked[digest] = False
+            st.session_state.version_checked[digest] = turn_on
 
         st.checkbox(
             f"v{version.version_index} ({version.call_count} calls)",
@@ -89,42 +73,70 @@ with st.sidebar:
             on_change=update_checkbox,
             args=(version.digest,),
         )
-first_version_that_is_checked = next(
-    (v for v in versions if st.session_state.version_checked.get(v.digest, False)), None
-)
-if first_version_that_is_checked is None:
+
+checked_versions = [
+    version
+    for version in versions
+    if st.session_state.version_checked.get(version.digest, False)
+]
+
+if len(checked_versions) == 0:
     st.warning("please select a version on the left")
     st.stop()
-version_digest = first_version_that_is_checked.digest
 
-op_fn = op_version_editor(client, sel_op.name, version_digest)
+compare_columns = st.columns(len(checked_versions))
 
-op_ref = OpRef(client.entity, client.project, sel_op.name, version_digest, [])
+op_refs = []
+op_fns = []
 
-op_param_names = get_op_param_names(op_fn)
+for col, version in zip(compare_columns, checked_versions):
+    with col:
+        st.write(st_safe_val(f"**{version.name}:v{version.version_index}**"))
+        op_fn = op_version_editor(client, sel_op.name, version.digest)
+        op_fns.append(op_fn)
+        op_ref = OpRef(client.entity, client.project, sel_op.name, version.digest, [])
+        op_refs.append(op_ref)
+
+all_op_param_names = [get_op_param_names(op) for op in op_fns]
+
+common_param_names = set(all_op_param_names[0])
+for op_param_names in all_op_param_names[1:]:
+    common_param_names = common_param_names.intersection(op_param_names)
+
+for op_param_names in all_op_param_names:
+    if set(op_param_names) != common_param_names:
+        st.warning("Ops have different signatures")
+        st.stop()
+
 
 with st.form("run_op"):
-    params = {k: st.text_input(k) for k in op_param_names}
+    params = {k: st.text_input(k) for k in common_param_names}
     if st.form_submit_button("Run Op"):
+        cols = st.columns(len(compare_columns))
         with set_graph_client(client):
-            if op_fn is None:
-                op_fn = op_ref.get()
-            result = op_fn(**params)
+            for col, op_ref, op_fn in zip(cols, op_refs, op_fns):
+                if op_fn is None:
+                    op_fn = op_ref.get()
+                result = op_fn(**params)
+                with col:
+                    result
             # st.rerun()
+cols = st.columns(len(compare_columns))
+for col, op_ref in zip(cols, op_refs):
+    with col:
+        calls = query.get_calls(client, [op_ref.uri()])
 
-calls = query.get_calls(client, [op_ref.uri()])
+        calls_view_df = calls.df[
+            [col for col in calls.df.columns if col.startswith("started_at")]
+            + [col for col in calls.df.columns if col.startswith("inputs")]
+            + [col for col in calls.df.columns if col.startswith("output")]
+        ].sort_values("started_at", ascending=False)
 
-calls_view_df = calls.df[
-    [col for col in calls.df.columns if col.startswith("started_at")]
-    + [col for col in calls.df.columns if col.startswith("inputs")]
-    + [col for col in calls.df.columns if col.startswith("output")]
-].sort_values("started_at", ascending=False)
-
-st.dataframe(
-    calls_view_df,
-    column_config={
-        "started_at": st.column_config.DatetimeColumn(
-            "Started", format="YYYY-MM-DD HH:mm:ss"
+        st.dataframe(
+            calls_view_df,
+            column_config={
+                "started_at": st.column_config.DatetimeColumn(
+                    "Started", format="YYYY-MM-DD HH:mm:ss"
+                )
+            },
         )
-    },
-)
