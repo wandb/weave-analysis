@@ -165,7 +165,7 @@ def weave_client_ops(
         filter = filter.model_copy()
     filter = cast(_ObjectVersionFilter, filter)
     filter.latest_only = latest_only
-    filter.is_op = True
+    # filter.is_op = True
     if id:
         filter.object_ids = [id]
 

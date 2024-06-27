@@ -3,7 +3,6 @@ import weave
 import pandas as pd
 import random
 from weave.trace.refs import CallRef, parse_uri
-from weave import graph_client_context
 import new_api
 
 from pandas_util import pd_apply_and_insert
@@ -220,12 +219,11 @@ for col_name in compute_df.columns:
             op_name = col_name.split(".", 1)[0]
         from weave.trace.refs import OpRef
 
-        location = client.ref_uri(op_name, "latest", "obj")
+        location = client._ref_uri(op_name, "latest", "obj")
         print("loc", location)
-        with graph_client_context.set_graph_client(client):
-            weave_op = parse_uri(client.ref_uri(op_name, "latest", "obj")).get()
-            ref = OpRef("None", "None", op_name, "latest")
-            weave_op.ref = ref
+        weave_op = parse_uri(client._ref_uri(op_name, "latest", "obj")).get()
+        ref = OpRef("None", "None", op_name, "latest")
+        weave_op.ref = ref
         t.add_op(weave_op)
 
 for row in st.session_state["compute"]["added_rows"]:
@@ -248,12 +246,11 @@ if run_button:
     status_bar = st.progress(0)
     with compute_table_container:
         compute_table_df
-    with graph_client_context.set_graph_client(client):
-        for i, delta in enumerate(t.execute()):
-            status_bar.progress((i + 1) / to_compute_count)
-            with compute_table_container:
-                compute_table_df = t.dataframe()
-                compute_table_df
+    for i, delta in enumerate(t.execute()):
+        status_bar.progress((i + 1) / to_compute_count)
+        with compute_table_container:
+            compute_table_df = t.dataframe()
+            compute_table_df
 
 
 rt = t.dataframe()

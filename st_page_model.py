@@ -1,43 +1,27 @@
 import streamlit as st
 import weave
-from weave.graph_client_context import set_graph_client
 import asyncio
 
+from weave.trace.refs import parse_uri
+
 import query
-from st_components import (
-    nice_ref,
-    st_safe_val,
-    st_op_selectbox,
-    st_wv_column_selectbox,
-    st_wv_column_multiselect,
-    st_scatter_plot_mean,
-    st_barplot_plot_mean,
-    st_scatter_pivotxy_mean_histo,
-    st_n_histos,
-    st_dict,
-    st_compare_dict,
-    st_multi_dict,
-)
+from st_components import *
 
 
-@st.cache_resource
-def init_weave(project_name: str):
-    return weave.init(project_name)
-
-
-@st.cache_resource
-def get_ref(_client, ref):
+def get_ref(client, ref):
     with st.spinner("ref.get"):
-        return _client.get(ref)
+        return client.get(ref)
 
 
-with st.spinner("weave.init"):
-    wv = init_weave("weavedev-hooman2")
+wv = st_project_picker()
 
 models = query.get_objs(wv, types="Model")
+model_refs = [parse_uri(r) for r in models.index]
 
 model_ref = st.selectbox(
-    "Model", models, format_func=lambda model: f"{model.name}:{model.digest}"
+    "Model",
+    model_refs,
+    format_func=lambda model: f"{model.name}:{model.digest[:3]}",
 )
 
 model = get_ref(wv, model_ref)
@@ -50,8 +34,7 @@ with st.form("call-form"):
 
 if submitted:
     with st.spinner("calling model predict"):
-        with set_graph_client(wv):
-            result = asyncio.run(model.predict(input_val))
+        result = asyncio.run(model.predict(input_val))
     result
 
 # with st.spinner("calling model predict"):

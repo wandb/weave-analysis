@@ -5,6 +5,7 @@ import weave
 import streamlit as st
 import math
 from weave.trace.refs import ObjectRef, OpRef
+from weave.weave_client import WeaveClient
 
 from pandas_util import pd_apply_and_insert
 
@@ -14,6 +15,8 @@ from weave_api_next import (
     weave_client_get_batch,
     weave_client_objs,
 )
+
+ST_HASH_FUNCS = {WeaveClient: lambda x: x._project_id()}
 
 
 def simple_val(v):
@@ -50,9 +53,8 @@ def split_obj_ref(series: pd.Series):
     return result
 
 
-@st.cache_data()
-def resolve_refs(project_name, refs):
-    client = weave.init(project_name)
+@st.cache_data(hash_funcs=ST_HASH_FUNCS)
+def resolve_refs(client, refs):
     # Resolve the refs and fetch the message.text field
     # Note we do do this after grouping, so we don't over-fetch refs
     ref_vals = weave_client_get_batch(client, refs)
@@ -104,10 +106,10 @@ class Objs:
     df: pd.DataFrame
 
 
-@st.cache_data()
-def get_objs(_client, types=None):
+@st.cache_data(hash_funcs=ST_HASH_FUNCS)
+def get_objs(client, types=None):
     # client = weave.init(project_name)
-    client_objs = weave_client_objs(_client, types=types)
+    client_objs = weave_client_objs(client, types=types)
     refs = []
     objs = []
     for v in client_objs:
@@ -177,7 +179,6 @@ class Calls:
         return cols
 
 
-# @st.cache_data()
 def get_calls(_client, op_name, input_refs=None, cache_key=None):
     call_list = [
         {
@@ -216,3 +217,8 @@ def get_calls(_client, op_name, input_refs=None, cache_key=None):
     df_final = df.drop(columns=usage_columns).join(df_summed)
 
     return Calls(df_final)
+
+
+@st.cache_data(hash_funcs=ST_HASH_FUNCS)
+def cached_get_calls(client, op_name, input_refs=None, cache_key=None):
+    return get_calls(client, op_name, input_refs, cache_key)

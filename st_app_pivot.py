@@ -4,7 +4,6 @@ import inspect
 import json
 import pandas as pd
 import weave
-from weave.graph_client_context import set_graph_client
 from code_editor import code_editor
 import openai
 from weave_api_next import weave_client_calls
@@ -50,12 +49,11 @@ if uploaded_file:
     uploaded_file.name
     name = uploaded_file.name.rsplit(".", 1)[0]
     df = pd.DataFrame(data)
-    with set_graph_client(client):
-        weave.publish(weave.Dataset(name=name, rows=data))
+    weave.publish(weave.Dataset(name=name, rows=data))
 
 ##### Dataset selector and loading.
 
-objs = client.objects()
+objs = client._objects()
 datasets = [f"{o.val.get('name')}:{o.digest}" for o in objs]
 col_a, col_b = st.columns(2)
 with col_a:
@@ -64,20 +62,18 @@ with col_b:
     limit = st.number_input("Limit", min_value=0, value=10)
 if not dataset_name_v:
     st.stop()
-with set_graph_client(client):
-    dataset = weave.ref(dataset_name_v).get()
+dataset = weave.ref(dataset_name_v).get()
 
-    ct = new_api.ComputeTable(dataset.rows, limit=limit)
+ct = new_api.ComputeTable(dataset.rows, limit=limit)
 
-    ds_rows = list(dataset.rows)
-    ds_rows_refs = [row.ref.uri() for row in ds_rows]
-    ds_df = pd.DataFrame(ds_rows, index=ds_rows_refs)
+ds_rows = list(dataset.rows)
+ds_rows_refs = [row.ref.uri() for row in ds_rows]
+ds_df = pd.DataFrame(ds_rows, index=ds_rows_refs)
 
 
 ##### Infer compute table from using_calls
 
-with set_graph_client(client):
-    all_using_calls = query.get_calls(client, None, ds_rows_refs)
+all_using_calls = query.get_calls(client, None, ds_rows_refs)
 last_versions = {}
 name_to_versions = {}
 
@@ -96,18 +92,16 @@ if len(all_using_calls.df):
 failed_ops = []
 
 for op_name, last_version in last_versions.items():
-    with set_graph_client(client):
-        op_ref = OpRef("none", "none", op_name, last_version, [])
-        op = op_ref.get()
+    op_ref = OpRef("none", "none", op_name, last_version, [])
+    op = op_ref.get()
     try:
         ct.add_op(op)
     except ValueError:
         failed_ops.append(op_name)
 really_failed_ops = []
 for op_name in failed_ops:
-    with set_graph_client(client):
-        op_ref = OpRef("none", "none", op_name, last_versions[op_name], [])
-        op = op_ref.get()
+    op_ref = OpRef("none", "none", op_name, last_versions[op_name], [])
+    op = op_ref.get()
     try:
         ct.add_op(op)
     except ValueError:
@@ -116,8 +110,7 @@ for op_name in failed_ops:
 if really_failed_ops:
     st.warning("Failed to add ops: " + ", ".join(really_failed_ops))
 
-with set_graph_client(client):
-    ct.fill_from_cache()
+ct.fill_from_cache()
 
 ##### Render compute table.
 
@@ -141,14 +134,13 @@ if st.button(f"Fill {total_to_run} blanks"):
     ]
     op_string = ", ".join(op_strings)
     my_bar = st.progress(0, text=op_string)
-    with set_graph_client(client):
-        for i, cell_result in enumerate(ct.execute()):
-            op_strings = [
-                f'{op_name} ({op_status["not_computed"]})'
-                for op_name, op_status in ct_status.items()
-            ]
-            op_string = ", ".join(op_strings)
-            my_bar.progress((i + 1) / total_to_run, text=op_string)
+    for i, cell_result in enumerate(ct.execute()):
+        op_strings = [
+            f'{op_name} ({op_status["not_computed"]})'
+            for op_name, op_status in ct_status.items()
+        ]
+        op_string = ", ".join(op_strings)
+        my_bar.progress((i + 1) / total_to_run, text=op_string)
     st.rerun()
 
 
@@ -172,8 +164,7 @@ if sel_rows:
             st.json(v, expanded=False)
 
     # Redundant using calls fetch to above.
-    with set_graph_client(client):
-        using_calls = query.get_calls(client, None, [row.name])
+    using_calls = query.get_calls(client, None, [row.name])
     using_calls_by_name = None
     if len(using_calls.df):
         using_calls_by_name = using_calls.df.groupby("op_name.name")
@@ -207,37 +198,33 @@ if sel_rows:
 
                 ##### Load op code
                 fn = None
-                with set_graph_client(client):
-                    server_read = client.server.obj_read(
-                        ObjReadReq(
-                            project_id="none/none", object_id=op_name, digest=version
-                        )
+                server_read = client.server.obj_read(
+                    ObjReadReq(
+                        project_id="none/none", object_id=op_name, digest=version
                     )
-                    code_file_digest = server_read.obj.val["files"]["obj.py"]
-                    code_file_contents = client.server.file_content_read(
-                        FileContentReadReq(
-                            project_id="none/none", digest=code_file_digest
-                        )
-                    ).content.decode()
-                    response_dict = code_editor(
-                        code_file_contents, key=f"code_editor_{op_name}_{version}"
+                )
+                code_file_digest = server_read.obj.val["files"]["obj.py"]
+                code_file_contents = client.server.file_content_read(
+                    FileContentReadReq(project_id="none/none", digest=code_file_digest)
+                ).content.decode()
+                response_dict = code_editor(
+                    code_file_contents, key=f"code_editor_{op_name}_{version}"
+                )
+                if response_dict["text"]:
+                    exec_locals = {}
+                    exec(response_dict["text"], globals(), exec_locals)
+                    art = MemTraceFilesArtifact(
+                        {"obj.py": response_dict["text"].encode()}
                     )
-                    if response_dict["text"]:
-                        exec_locals = {}
-                        exec(response_dict["text"], globals(), exec_locals)
-                        art = MemTraceFilesArtifact(
-                            {"obj.py": response_dict["text"].encode()}
-                        )
-                        fn = op_type.load_instance(art, "obj")
+                    fn = op_type.load_instance(art, "obj")
 
                 if st.button("Run Op", key=f"run_op_{col_name}"):
                     op_ref = OpRef("none", "none", op_name, version, [])
-                    with set_graph_client(client):
-                        if fn is None:
-                            fn = op_ref.get()
-                        op_param_names = get_op_param_names(fn)
-                        params = {k: avail_vars[k] for k in op_param_names}
-                        result = fn(**params)
+                    if fn is None:
+                        fn = op_ref.get()
+                    op_param_names = get_op_param_names(fn)
+                    params = {k: avail_vars[k] for k in op_param_names}
+                    result = fn(**params)
                     st.rerun()
                 if (
                     using_calls_by_name is not None
@@ -305,9 +292,8 @@ def explain({k0}):
         fn = op_type.load_instance(art, "obj")
         # fn = weave.op()(exec_locals[list(exec_locals.keys())[-1]])
         if st.button("Run"):
-            with set_graph_client(client):
-                op_param_names = get_op_param_names(fn)
-                params = {k: avail_vars[k] for k in op_param_names}
-                result = fn(**params)
+            op_param_names = get_op_param_names(fn)
+            params = {k: avail_vars[k] for k in op_param_names}
+            result = fn(**params)
             result
             st.rerun()

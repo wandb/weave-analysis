@@ -111,10 +111,10 @@ with st.form("run_op"):
     params = {k: st.text_input(k) for k in common_param_names}
     if st.form_submit_button("Run Op"):
         cols = st.columns(len(compare_columns))
-        for col, op_ref, op_fn in zip(cols, op_refs, op_fns):
-            if op_fn is None:
-                op_fn = op_ref.get()
+        for col, op_fn in zip(cols, op_fns):
             result = op_fn(**params)
+
+            st.session_state.version_checked[op_fn.ref.digest] = True
             with col:
                 result
             st.rerun()

@@ -57,6 +57,8 @@ def st_op_selectbox(
     label: str,
     sort_key: Optional[Callable[[query.Op], Any]] = None,
 ):
+    import streamlit as st
+
     ops = query.get_ops(client)
     if sort_key:
         ops = sorted(ops, key=sort_key)

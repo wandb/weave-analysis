@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from collections.abc import Iterator
 from typing import Callable, Optional
 import weave
-from weave import graph_client_context
+from weave.client_context.weave_client import require_weave_client
 import inspect
 import itertools
 import tqdm
@@ -183,7 +183,7 @@ class WeaveResultCache:
         pass
 
     def get_many(self, op_ref, op_configs):
-        wc = graph_client_context.require_graph_client()
+        wc = require_weave_client()
 
         calls = query.get_calls(wc, op_ref)
         op_configs = [
@@ -202,7 +202,7 @@ class WeaveResultCache:
         return results
 
     def get_many(self, op_ref, op_configs):
-        wc = graph_client_context.require_graph_client()
+        wc = require_weave_client()
         calls = query.get_calls(wc, op_ref)
 
         # Convert op_configs to a DataFrame
@@ -320,7 +320,7 @@ class ComputeTable:
         ]
 
     def fill_from_cache(self):
-        wc = graph_client_context.require_graph_client()
+        wc = require_weave_client()
         for col_name, col in self.columns.items():
             if isinstance(col, OpColumn):
                 ref = wc._save_op(col.op, col.op.name).uri()
@@ -341,7 +341,7 @@ class ComputeTable:
         return op_status
 
     def execute(self):
-        wc = graph_client_context.require_graph_client()
+        wc = require_weave_client()
         for col_name, col in self.columns.items():
             work_to_do = {}
             if isinstance(col, OpColumn):
@@ -356,13 +356,13 @@ class ComputeTable:
             with ThreadPoolExecutor(max_workers=16) as executor:
 
                 def do_one(work):
-                    with graph_client_context.set_graph_client(wc):
-                        (i, col_name), op_config = work
-                        col = self.columns[col_name]
-                        try:
-                            return col.op(**op_config)
-                        except:
-                            return None
+                    # with graph_client_context.set_graph_client(wc):
+                    (i, col_name), op_config = work
+                    col = self.columns[col_name]
+                    try:
+                        return col.op(**op_config)
+                    except:
+                        return None
 
                 results = list(executor.map(do_one, work_to_do.items()))
 

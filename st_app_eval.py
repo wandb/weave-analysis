@@ -4,6 +4,7 @@ import query
 from st_components import (
     nice_ref,
     st_safe_val,
+    st_project_picker,
     st_op_selectbox,
     st_wv_column_selectbox,
     st_wv_column_multiselect,
@@ -21,10 +22,11 @@ st.set_page_config(layout="wide")
 
 with st.sidebar:
     # project_name = st.selectbox("Project Name", ["humaneval6", "weave-hooman1"])
-    project_name = st.text_input("Project Name", "weave-hooman1")
+    # project_name = st.text_input("Project Name", "weave-hooman1")
+    client = st_project_picker()
 
     op = st_op_selectbox(
-        project_name,
+        client,
         "Op",
         sort_key=lambda o: (
             not "predict_and_score" in o.name,
@@ -35,7 +37,7 @@ with st.sidebar:
         st.warning("No ops available. Please type in a project name!")
         st.stop()
 
-    calls2 = query.get_calls(project_name, op.name)
+    calls2 = query.cached_get_calls(client, op.name)
     calls = calls2.df
 
     compare_key = st_wv_column_selectbox(
@@ -105,7 +107,7 @@ if len(compare_vals) > 2:
 
 
 if query.is_ref_series(compare_val_stats_df[compare_key]):
-    expanded_df = query.resolve_refs(project_name, compare_val_stats_df[compare_key])
+    expanded_df = query.resolve_refs(client, compare_val_stats_df[compare_key])
     compare_vals_df = expanded_df.loc[compare_vals]
     with st.expander(f"{len(compare_vals)} {compare_key} values"):
         if len(compare_vals_df) > 1:
@@ -153,7 +155,7 @@ across_target_df = calls.pivot_table(
 )
 across_vals = across_target_df.index.to_series()
 if query.is_ref_series(across_vals):
-    across_vals = query.resolve_refs(project_name, across_vals)
+    across_vals = query.resolve_refs(client, across_vals)
 
 across_target_df_display = across_target_df.copy()
 across_target_df_display.insert(0, across_key, across_target_df.index.map(nice_ref))

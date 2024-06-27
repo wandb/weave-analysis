@@ -1,24 +1,10 @@
 import streamlit as st
 import weave
-from weave.graph_client_context import set_graph_client
 import asyncio
 import plotly.express as px
 
 import query
-from st_components import (
-    nice_ref,
-    st_safe_val,
-    st_op_selectbox,
-    st_wv_column_selectbox,
-    st_wv_column_multiselect,
-    st_scatter_plot_mean,
-    st_barplot_plot_mean,
-    st_scatter_pivotxy_mean_histo,
-    st_n_histos,
-    st_dict,
-    st_compare_dict,
-    st_multi_dict,
-)
+from st_components import *
 
 st.set_page_config(layout="wide")
 
@@ -29,17 +15,11 @@ target_keys = [
 ]
 
 
-@st.cache_resource
-def init_weave(project_name: str):
-    return weave.init(project_name)
-
-
-with st.spinner("weave.init"):
-    wv = init_weave("weave-hooman1")
+wv = st_project_picker()
 
 models = query.get_objs(wv, types="Model")
 
-predscore_calls = query.get_calls(project_name, "Evaluation.predict_and_score")
+predscore_calls = query.cached_get_calls(wv, "Evaluation.predict_and_score")
 predscore_calls_df = predscore_calls.df
 
 predscore_calls_df = predscore_calls_df[
@@ -114,12 +94,11 @@ with st.expander("Examples"):
             selected_calls["inputs.example"].isin(selected_ex_refs)
         ]
 
-model_details_df = query.resolve_refs(project_name, models.index.to_series())
+model_details_df = query.resolve_refs(wv, models.index.to_series())
 
 if len(selected_model_refs):
     model_details_df = model_details_df.loc[selected_model_refs]
 selected_evals = selected_calls["inputs.self"].value_counts()
-selected_evals
 
 st_compare_dict(model_details_df.to_dict(orient="records"), model_details_df.index)
 
