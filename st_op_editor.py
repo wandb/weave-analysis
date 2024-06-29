@@ -41,7 +41,7 @@ with st.sidebar:
 
 if sel_op is None:
     st.warning("No ops yet")
-    op_fn = op_code_editor(client, DEFAULT_NEW_OP_CODE)
+    op_fn = op_code_editor(DEFAULT_NEW_OP_CODE, key="new_op")
     op_param_names = get_op_param_names(op_fn)
 
     with st.form("run_op"):
@@ -117,7 +117,7 @@ with st.form("run_op"):
             st.session_state.version_checked[op_fn.ref.digest] = True
             with col:
                 result
-            st.rerun()
+        st.rerun()
 cols = st.columns(len(compare_columns))
 for col, op_ref in zip(cols, op_refs):
     with col:

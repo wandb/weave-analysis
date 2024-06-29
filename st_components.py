@@ -307,8 +307,8 @@ def st_compare_dict(dicts, headers, st_key="compare"):
             cols[1].write(dicts[0].get(key))
 
 
-def op_code_editor(client, op_code: str):
-    response_dict = code_editor(op_code)
+def op_code_editor(op_code: str, key: str):
+    response_dict = code_editor(op_code, key=key)
     if response_dict["text"]:
         op_code = response_dict["text"]
     exec_locals = {}
@@ -331,7 +331,7 @@ def op_version_editor(client, op_name, version):
     code_file_contents = client.server.file_content_read(
         FileContentReadReq(project_id=client._project_id(), digest=code_file_digest)
     ).content.decode()
-    fn = op_code_editor(client, code_file_contents)
+    fn = op_code_editor(code_file_contents, f"{op_name}:{version}")
 
     return fn
 

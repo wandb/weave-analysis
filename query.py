@@ -94,9 +94,13 @@ def get_op_versions(_client, id, include_call_counts=False):
     ]
     if include_call_counts:
         calls = get_calls(_client, [o.ref().uri() for o in ops])
-        counts = calls.df.groupby("op_name").size()
-        for op in ops:
-            op.call_count = counts.get(op.ref().uri())
+        if len(calls.df):
+            counts = calls.df.groupby("op_name").size()
+            for op in ops:
+                op.call_count = counts.get(op.ref().uri())
+        else:
+            for op in ops:
+                op.call_count = 0
 
     return list(reversed(ops))
 
@@ -106,7 +110,7 @@ class Objs:
     df: pd.DataFrame
 
 
-@st.cache_data(hash_funcs=ST_HASH_FUNCS)
+# @st.cache_data(hash_funcs=ST_HASH_FUNCS)
 def get_objs(client, types=None):
     # client = weave.init(project_name)
     client_objs = weave_client_objs(client, types=types)
