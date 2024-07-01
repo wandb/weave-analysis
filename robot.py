@@ -12,12 +12,14 @@ from openai._types import NotGiven
 from weave.flow.tools import chat_call_tool_params, perform_tool_calls
 from weave.flow.chat_util import OpenAIStream
 from weave.trace.refs import parse_uri, OpRef, CallRef
+from weave.client_context.weave_client import require_weave_client
 
 from st_components import *
 
 st.set_page_config(layout="wide")
 
-client = openai.OpenAI()
+with st.sidebar:
+    client = st_project_picker()
 
 
 def op_from_code(code: str):
@@ -37,35 +39,97 @@ def create_op(code: str) -> str:
     """Create a new op from the given code.
 
     Args:
-        code: Python code for the op we're creating. Most include all necessary imports, and a single python function, decorated with @weave.op().
+        code: Python code for the op we're creating. Must include all necessary imports, and a single python function, decorated with @weave.op().
 
     Returns:
         A weave ref uri to the created op.
     """
     op = op_from_code(code)
     op_ref = weave.publish(op)
-    return op_ref.uri()
+    # Super SUPER gnarly bug. If we return op_ref.uri() here, and the result
+    # of this op is stored in a thread, the thread will not deserialize correctly
+    # because we automatically convert strings that look like weave refs to
+    # *Ref objects. After that you can't pass the thread back to openai.
+    # TODO: FIX
+    return "Ref: " + op_ref.uri()
+
+
+def _call_op(op_uri: str, args: list) -> str:
+    op_ref = parse_uri(op_uri)
+    op = op_ref.get()
+    return op(*args)
+
+
+weave.call_op = _call_op
 
 
 @weave.op()
-def call_op(op_uri: str, args: dict) -> str:
+def call_op(op_uri: str, args: list) -> str:
     """Call an op with the given uri and arguments.
 
     Args:
         op_uri: The URI of the op to call.
-        args: A dictionary of arguments to pass to the op.
+        args: A list of position arguments to pass to the op.
 
     Returns:
         A json object containing the ref uri of the resulting call record, and the first 100 characters of the call's output.
     """
     op_ref = parse_uri(op_uri)
     op = op_ref.get()
-    result_call = op.call(**args)
+    result_call = op.call(*args)
     entity, project = result_call.project_id.split("/")
     call_ref = CallRef(entity, project, result_call.id)
-    return json.dumps(
-        {"ref": call_ref.uri(), "first_100_output_chars": str(result_call.output)[:100]}
-    )
+    call_output = str(result_call.output)
+    if len(call_output) > 100:
+        call_output = call_output[:100] + " [truncated]"
+    return json.dumps({"call_uri": call_ref.uri(), "call_output_head": call_output})
+
+
+@weave.op()
+def read_call_output_window(call_uri: str, offset: int) -> str:
+    """Given a call_uri, read what the output of the call was. This is useful for long outputs. Will return max 1000 chars.
+
+    Args:
+        call_uri: The URI of the call to read.
+        offset: The offset into the output to start reading from.
+
+    Returns:
+        Stringified output starting from offset.
+    """
+    call_ref = parse_uri(call_uri)
+    client = require_weave_client()
+    call = client.call(call_ref.id)
+    output_s = str(call.output)
+    return output_s[offset : offset + 1000]
+
+
+@weave.op()
+def list_ops() -> list[str]:
+    """List all ops in the current project.
+
+    Returns:
+        A list of URIs for all ops in the current project.
+    """
+    client = require_weave_client()
+    ops = query.get_ops(client)
+    return [
+        OpRef(client.entity, client.project, op.name, op.digest).uri() for op in ops
+    ]
+
+
+def read_op_code(op_uri: str) -> str:
+    """Read the code of an op.
+
+    Args:
+        op_uri: The URI of the op to read.
+
+    Returns:
+        The code of the op.
+    """
+    op_ref = parse_uri(op_uri)
+    op = op_ref.get()
+    print(op.art.path_contents)
+    return op.art.path_contents["obj.py"].decode()
 
 
 class Thread(weave.Object):
@@ -110,11 +174,10 @@ class Agent(weave.Object):
                 )
                 for tool_result_message in tool_result_messages:
                     if "content" in tool_result_message:
-                        try:
-                            parsed = parse_uri(tool_result_message["content"])
-                        except ValueError:
-                            parsed = None
-                        if parsed:
+                        if tool_result_message["content"].startswith("Ref: "):
+                            parsed = parse_uri(
+                                tool_result_message["content"].split(" ", 1)[1]
+                            )
                             st.session_state.sel_op_ref = parsed
                 new_messages += tool_result_messages
         # Still have to do this instead of concat :(
@@ -124,17 +187,23 @@ class Agent(weave.Object):
         )
 
 
+thread_objs = query.get_objs(client, types=["Thread"])
 if "thread" not in st.session_state:
-    st.session_state.thread = Thread(
-        name="Thread-" + "".join(random.choice(string.ascii_letters) for _ in range(5)),
-        messages=[],
-    )
+    if thread_objs:
+        st.session_state.thread = thread_objs[0].get()._val
+    else:
+        st.session_state.thread = Thread(
+            name="Thread-"
+            + "".join(random.choice(string.ascii_letters) for _ in range(5)),
+            messages=[],
+        )
+
 
 if "agent" not in st.session_state:
     st.session_state.agent = Agent(
         system_message="You are so helpful",
         model_name="gpt-4o",
-        tools=[create_op, call_op],
+        tools=[create_op, call_op, read_call_output_window, list_ops, read_op_code],
     )
 
 
@@ -169,11 +238,33 @@ def thread_panel(thread: Thread):
         st.session_state.thread = thread
 
 
-with st.sidebar:
-    client = st_project_picker()
-
 col0, col1 = st.columns(2)
 with col0:
+    thread_form_cols = st.columns((4, 1))
+    with thread_form_cols[0]:
+
+        def on_thread_change():
+            st.session_state.thread = st.session_state.thread_picker.get()._val
+
+        st.selectbox(
+            "Thread",
+            thread_objs,
+            format_func=lambda x: f"{x.name} ({x.version_index + 1} steps)",
+            key="thread_picker",
+            on_change=on_thread_change,
+        )
+    with thread_form_cols[1]:
+        st.markdown(
+            "<div style='width: 1px; height: 28px'></div>", unsafe_allow_html=True
+        )
+        if st.button("New thread"):
+            st.session_state.thread = Thread(
+                name="Thread-"
+                + "".join(random.choice(string.ascii_letters) for _ in range(5)),
+                messages=[],
+            )
+            st.rerun()
+
     thread_panel(st.session_state.thread)
 with col1:
     ops = query.get_ops(client)

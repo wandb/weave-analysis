@@ -2,6 +2,7 @@ from typing import Callable, Optional, Any
 from dataclasses import dataclass
 import pandas as pd
 import weave
+import datetime
 import streamlit as st
 import math
 from weave.trace.refs import ObjectRef, OpRef
@@ -110,10 +111,26 @@ class Objs:
     df: pd.DataFrame
 
 
+@dataclass
+class Obj:
+    project_id: str
+    name: str
+    digest: str
+    version_index: int
+    created_at: datetime.datetime
+
+    def ref(self):
+        entity_id, project_id = self.project_id.split("/", 1)
+        return ObjectRef(entity_id, project_id, self.name, self.digest)
+
+    def get(self):
+        return self.ref().get()
+
+
 # @st.cache_data(hash_funcs=ST_HASH_FUNCS)
-def get_objs(client, types=None):
+def get_objs(client, types=None, latest_only=True):
     # client = weave.init(project_name)
-    client_objs = weave_client_objs(client, types=types)
+    client_objs = weave_client_objs(client, types=types, latest_only=latest_only)
     refs = []
     objs = []
     for v in client_objs:
@@ -123,7 +140,23 @@ def get_objs(client, types=None):
         # TODO there is other metadata like created at
     df = pd.json_normalize([simple_val(v) for v in objs])
     df.index = refs
-    return df
+    return list(
+        reversed(
+            sorted(
+                [
+                    Obj(
+                        v.project_id,
+                        v.object_id,
+                        v.digest,
+                        v.version_index,
+                        v.created_at,
+                    )
+                    for v in client_objs
+                ],
+                key=lambda v: v.created_at,
+            )
+        )
+    )
     # return [Op(op.object_id, op.version_index) for op in client_ops]
 
 
