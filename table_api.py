@@ -1,5 +1,6 @@
 import inspect
 from typing import Optional, Union, Callable, Any, Iterator, Protocol
+import dataclasses
 from dataclasses import dataclass
 from weave.weave_client import WeaveClient
 from weave.trace.refs import CallRef
@@ -116,7 +117,7 @@ class Engine:
     def _map_cached_results(self, map: "WeaveMap"):
         # TODO: not ideal, uses client, not server, but engine
         # should be able to run on server
-        op_ref = weave.publish(map.op)
+        op_ref = weave.publish(map.op_call.op)
 
         calls_df = self._calls_df(_CallsFilter(op_names=[op_ref.uri()]))
 
@@ -183,10 +184,10 @@ class Engine:
 
             def do_one(work):
                 i, op_config = work
-                try:
-                    return i, map.op(**op_config)
-                except:
-                    return i, None
+                # try:
+                return i, map.op_call.op(**op_config)
+                # except:
+                #     return i, None
 
             for index, result in executor.map(do_one, work_to_do.items()):
                 yield {"index": index, "val": result}
@@ -314,18 +315,18 @@ def calls(
 
 
 @dataclass
-class WeaveMap:
+class WeaveMap(Executable):
     data: Any
-    op: Any
-    _column_mapping: Optional[dict[str, str]]
+    op_call: "OpCall"
+    n_trials: Optional[int]
 
     result: Optional[pd.Series] = None
 
     @property
     def column_mapping(self):
-        if self._column_mapping is None:
-            return {k: k for k in get_op_param_names(self.op)}
-        return self._column_mapping
+        if not self.op_call.column_mapping:
+            return {k: k for k in get_op_param_names(self.op_call.op)}
+        return self.op_call.column_mapping
 
     def cost(self):
         engine = get_engine()
@@ -339,13 +340,101 @@ class WeaveMap:
             yield item_result
         self.result = pd.Series(
             [r["val"] for r in results],
-            name=self.op.name,
             index=[r["index"] for r in results],
         )
 
 
-def weave_map(data, op, column_mapping: Optional[dict[str, str]] = None):
-    return WeaveMap(data, op, column_mapping)
+def weave_map(
+    data,
+    op_call: "OpCall",
+    n_trials: Optional[int] = None,
+):
+    return WeaveMap(data, op_call, n_trials)
+
+
+class QuerySequence(Protocol):
+    pass
+
+
+@dataclass
+class OpCall:
+    op: Any
+    column_mapping: Optional[dict[str, str]] = dataclasses.field(default_factory=dict)
+
+
+@dataclass
+class PipelineStep:
+    op_call: OpCall
+    step_id: str
+    n_trials: int
+
+
+@dataclass
+class PipelineStepCompare:
+    op_calls: list[OpCall]
+    step_id: str
+    n_trials: int
+
+    def add_op(self, op: Any, column_mapping: Optional[dict[str, str]] = None):
+        if column_mapping is None:
+            column_mapping = {k: k for k in get_op_param_names(op)}
+        self.op_calls.append(OpCall(op, column_mapping))
+
+
+@dataclass
+class BatchPipeline(Executable):
+    base: QuerySequence
+    steps: dict[str, Union[PipelineStep, PipelineStepCompare]] = dataclasses.field(
+        default_factory=dict
+    )
+    result: Optional[pd.DataFrame] = None
+
+    def add_step(
+        self,
+        op: Callable,
+        column_mapping: Optional[dict[str, str]] = dataclasses.field(
+            default_factory=dict
+        ),
+        step_id: Optional[str] = None,
+        n_trials: Optional[int] = None,
+    ):
+        if step_id is None:
+            step_id = op.name
+        if n_trials is None:
+            n_trials = 1
+        step = PipelineStep(OpCall(op, column_mapping), step_id, n_trials)
+        self.steps[step_id] = step
+        return step
+
+    def add_compare_step(self, step_name: str, n_trials: Optional[int] = None):
+        # This forks the pipeline
+        if n_trials is None:
+            n_trials = 1
+        step = PipelineStepCompare([], step_name, n_trials)
+        self.steps[step_name] = step
+        return step
+
+    def cost(self):
+        results = {}
+        for step in self.steps.values():
+            if isinstance(step, PipelineStep):
+                map = weave_map(self.base, step.op_call)
+                results[step.step_id] = map.cost()
+            elif isinstance(step, PipelineStepCompare):
+                raise NotImplemented
+        return results
+
+    def execute(self):
+        results = {}
+        for step in self.steps.values():
+            if isinstance(step, PipelineStep):
+                map = weave_map(self.base, step.op_call)
+                for delta in map.execute():
+                    yield {"step": step.step_id, **delta}
+                results[step.step_id] = map.result
+            elif isinstance(step, PipelineStepCompare):
+                raise NotImplemented
+        self.result = pd.DataFrame(results)
 
 
 @weave.op()
@@ -371,58 +460,101 @@ def strlen(s: str):
     return len(s)
 
 
-def summarize_curdir_py():
-    for f in glob.glob("*.py"):
-        with open(f, "r") as file:
-            code = file.read()
-            print(f"Summarizing {f}")
-            print(summarize_purpose(code))
-            print("\n\n")
-
-
-@dataclass
-class Table:
-    columns: list
-
-    def groupby(self, by):
-        pass
-
-
 wc = weave.init_local_client("testableapi.db")
 ENGINE = Engine(wc._project_id(), wc.server)
 
-if __name__ == "__main__":
-    # Setup
 
+class LocalQueryable(QuerySequence):
+    def __init__(self, df):
+        self.df = df
+
+    def to_pandas(self):
+        return self.df
+
+
+def summarize_curdir_py():
+    files = []
+    for f_name in glob.glob("*.py"):
+        files.append({"name": f_name, "code": open(f_name).read()})
+    map = weave_map(
+        LocalQueryable(pd.DataFrame(files)), OpCall(summarize_purpose), n_trials=1
+    )
+    print(map.cost())
+    for delta in map.execute():
+        pass
+    return map.result
+
+
+if __name__ == "__main__":
     # Create data
-    # summarize_curdir_py()
+    print("SUMMARIZE RESULT", summarize_curdir_py())
 
     # # Read
     my_calls = calls(wc, "summarize_purpose", limit=100)
     print("# Calls", len(my_calls))
     print("Columns", my_calls.columns())
-    my_calls.append_column(classify, my_calls.column("inputs.code"))
-    my_calls.append_column(strlen, my_calls.column("output"))
-    my_calls.cost()
-    grouped = my_calls.groupby("classify")
-    grouped.add_column("mean", grouped.column('strlen')
-    print('grouped cost', grouped.cost())
-    print(grouped)
+    # my_calls.append_column(classify, my_calls.column("inputs.code"))
+    # my_calls.append_column(strlen, my_calls.column("output"))
+    # my_calls.cost()
+    # grouped = my_calls.groupby("classify")
+    # grouped.add_column("mean", grouped.column('strlen')
+    # print('grouped cost', grouped.cost())
+    # print(grouped)
 
-    input_code_class = weave_map(my_calls, classify, {"code": "inputs.code"})
-    print("Classify cost", input_code_class.cost())
-    for result in input_code_class.execute():
-        pass
+    # input_code_class = weave_map(my_calls, classify, {"code": "inputs.code"})
+    # print("Classify cost", input_code_class.cost())
+    # for result in input_code_class.execute():
+    #     pass
 
-    output_len = weave_map(my_calls, strlen, {"s": "output"})
-    print("Strlen cost", input_code_class.cost())
-    for result in output_len.execute():
-        pass
+    # output_len = weave_map(my_calls, strlen, {"s": "output"})
+    # print("Strlen cost", input_code_class.cost())
+    # for result in output_len.execute():
+    #     pass
 
-    both = pd.concat([input_code_class.result, output_len.result], axis=1)
-    print(both.groupby("classify").mean())
+    # both = pd.concat([input_code_class.result, output_len.result], axis=1)
+    # print(both.groupby("classify").mean())
 
     # TODO: get this grouping down into API
     # show how to fetch all calls in a group. (streamlit example)
     # show fetching up child calls
     # show working
+    # Make work into pivot table
+    # index (input_ref, trial), columns: one level for each branch
+
+    p = BatchPipeline(my_calls)
+    p.add_step(classify, column_mapping={"code": "inputs.code"})
+    p.add_step(strlen, column_mapping={"s": "output"})
+    print(p.cost())
+    for delta in p.execute():
+        pass
+    print(p.result.groupby("classify").mean())
+
+    # TODO:
+    #   - make compare_step work
+    #   - make n_trials work
+    #   - better argument passing (instead of column_mapping?)
+    #   - non-batch version
+    #   - make work on raw data?
+    #   - better error handling
+    #   - I need whole Call information available, not just output
+    #     (for example, for building a nice Eval table with feedback)
+
+    # res = p.execute()
+    # print(res)
+
+    # This is how BatchPipeline would work for an Eval
+
+    # eval = eval_picker()
+    # ds = eval.dataset
+    # models = model_picker()
+    # p = BatchPipeline(ds)
+    # model_step = p.add_compare_step(step_name="model", n_trials=eval.n_trials)
+    # for model in models:
+    #     model_step.add_op(model.op)
+    # for score_fn in eval.score_fns:
+    #     p.add_step(score_fn.op, {})
+
+    # print(t.cost())
+    # for result_delta in t.execute():
+    #     print(result_delta)
+    # df = t.result.dataframe()
