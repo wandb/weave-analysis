@@ -7,6 +7,7 @@ import pandas as pd
 
 from api2.proto import Executable, QuerySequence, OpType
 from api2.engine_context import get_engine
+from api2.provider import make_source, SourceType
 
 
 def get_op_param_names(op: Callable):
@@ -50,16 +51,17 @@ class WeaveMap(Executable):
 
 
 def weave_map(
-    data: QuerySequence,
-    op_call: "OpCall",
-    n_trials: Optional[int] = None,
+    data: SourceType,
+    op: Callable,
+    inputs: Optional[dict[str, str]] = None,
+    n_trials: int = 1,
 ):
-    return WeaveMap(data, op_call, n_trials)
+    return WeaveMap(make_source(data), OpCall(op, inputs), n_trials)
 
 
 @dataclass
 class OpCall:
-    op: Any
+    op: Callable
     inputs: Optional[dict[str, str]] = dataclasses.field(default_factory=dict)
 
 

@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from dataclasses import dataclass
 from weave.weave_client import WeaveClient
 from weave.trace.refs import CallRef
@@ -138,3 +138,16 @@ def calls(
                 op_ref_uris.append(f"weave:///{self._project_id()}/op/{op_name}")
         trace_server_filt.op_names = op_ref_uris
     return CallsQuery(self.entity, self.project, trace_server_filt, limit=limit)
+
+
+SourceType = Union[QuerySequence, pd.DataFrame, list[dict]]
+
+
+def make_source(val: SourceType) -> QuerySequence:
+    if isinstance(val, QuerySequence):
+        return val
+    elif isinstance(val, pd.DataFrame):
+        return LocalQueryable(val)
+    elif isinstance(val, list):
+        return LocalQueryable(pd.DataFrame(val))
+    raise ValueError("Must provide a... TODO")

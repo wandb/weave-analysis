@@ -1,4 +1,4 @@
-from typing import Any, Iterator, Protocol
+from typing import Any, Iterator, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -18,6 +18,7 @@ class Column(Protocol):
     def to_pandas(self) -> pd.Series: ...
 
 
+@runtime_checkable
 class QuerySequence(Protocol):
     def column(self, column_name: str) -> Column: ...
 
