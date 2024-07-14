@@ -28,7 +28,7 @@ predscore_calls_df = predscore_calls_df[
 
 
 with st.expander("Models"):
-    compare_val_stats_df, compare_vals = st_scatter_plot_mean(
+    compare_val_stats_df, compare_vals = wv_st_scatter_plot_mean(
         predscore_calls_df, "inputs.model", target_keys[1], target_keys[0]
     )
 

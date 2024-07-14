@@ -5,7 +5,7 @@ import openai
 import weave
 
 from api2.pipeline import BatchPipeline, OpCall, weave_map
-from api2.provider import calls, LocalQueryable
+from api2.provider import calls, LocalDataframe
 from api2.engine import init_engine
 
 
@@ -23,7 +23,7 @@ def summarize_curdir_py():
     files = []
     for f_name in glob.glob("*.py"):
         files.append({"name": f_name, "code": open(f_name).read()})
-    map = weave_map(files, word_count)
+    map = weave_map(files, word_count, n_trials=2)
     return map.get_result()
 
 

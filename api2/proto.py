@@ -3,6 +3,10 @@ from typing import Any, Iterator, Protocol, runtime_checkable
 import pandas as pd
 
 
+class DBOp:
+    pass
+
+
 class Executable(Protocol):
     def cost(self) -> dict: ...
 
@@ -16,6 +20,15 @@ class Executable(Protocol):
 # So spec this out more.
 class Column(Protocol):
     def to_pandas(self) -> pd.Series: ...
+
+
+@runtime_checkable
+class Query(Protocol):
+    from_op: DBOp
+
+
+class ListsQuery(Query):
+    pass
 
 
 @runtime_checkable

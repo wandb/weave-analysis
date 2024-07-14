@@ -8,7 +8,7 @@ from st_components import (
     st_op_selectbox,
     st_wv_column_selectbox,
     st_wv_column_multiselect,
-    st_scatter_plot_mean,
+    wv_st_scatter_plot_mean,
     st_barplot_plot_mean,
     st_scatter_pivotxy_mean_histo,
     st_n_histos,
@@ -96,7 +96,7 @@ if len(target_keys) < 2:
 
 st.header(f"Comparing *{op.name}* calls by *{compare_key}*")
 
-compare_val_stats_df, compare_vals = st_scatter_plot_mean(
+compare_val_stats_df, compare_vals = wv_st_scatter_plot_mean(
     calls, compare_key, target_keys[1], target_keys[0]
 )
 if len(compare_vals) < 1:
@@ -143,7 +143,7 @@ elif len(compare_vals) == 2:
             if len(selected):
                 calls = calls[calls[across_key].isin(selected)]
 else:
-    _, across_vals = st_scatter_plot_mean(
+    _, across_vals = wv_st_scatter_plot_mean(
         calls, across_key, target_keys[1], target_keys[0]
     )
     if len(across_vals):

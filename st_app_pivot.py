@@ -26,7 +26,7 @@ st.set_page_config(layout="wide")
 
 @st.cache_resource
 def init_weave():
-    return weave.init_local_client()
+    return weave.init_local_client("weavenew.db")
 
 
 def get_op_param_names(op: Callable):

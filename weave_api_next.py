@@ -94,13 +94,19 @@ def make_client_call(
 class CallsIter:
     server: TraceServerInterface
     filter: _CallsFilter
+    _column: str
 
     def __init__(
-        self, server: TraceServerInterface, project_id: str, filter: _CallsFilter
+        self,
+        server: TraceServerInterface,
+        project_id: str,
+        filter: _CallsFilter,
+        column: str = "",
     ) -> None:
         self.server = server
         self.project_id = project_id
         self.filter = filter
+        self._column = column
 
     def __getitem__(self, key: Union[slice, int]) -> Call:
         if isinstance(key, slice):
@@ -132,6 +138,9 @@ class CallsIter:
             if len(page_data) < page_size:
                 break
             page_index += 1
+
+    def column(self, col_name: str) -> "CallsIter":
+        return CallsIter(self.server, self.project_id, _CallsFilter(), col_name)
 
 
 def weave_client_calls(self: WeaveClient, op_names, input_refs=None) -> CallsIter:
@@ -189,7 +198,10 @@ def weave_client_ops(
 
 
 def weave_client_objs(
-    self: WeaveClient, filter: Optional[_ObjectVersionFilter] = None, types=None
+    self: WeaveClient,
+    filter: Optional[_ObjectVersionFilter] = None,
+    types=None,
+    latest_only=True,
 ) -> list[ObjSchema]:
     if not filter:
         filter = _ObjectVersionFilter()
@@ -200,8 +212,7 @@ def weave_client_objs(
             types = [types]
         filter.base_object_classes = types
     filter = cast(_ObjectVersionFilter, filter)
-    # TODO: fetches latest_only. Need to be more general.
-    # filter.latest_only = True
+    filter.latest_only = latest_only
     filter.is_op = False
 
     response = self.server.objs_query(
@@ -210,6 +221,16 @@ def weave_client_objs(
             filter=filter,
         )
     )
+
+    # latest_only is broken in sqlite implementation, so do it here.
+    if latest_only:
+        latest_objs = {}
+        for obj in response.objs:
+            prev_obj = latest_objs.get(obj.object_id)
+            if prev_obj and prev_obj.version_index > obj.version_index:
+                continue
+            latest_objs[obj.object_id] = obj
+        response = ObjQueryRes(objs=list(latest_objs.values()))
     return response.objs
 
 

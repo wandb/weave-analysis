@@ -5,7 +5,7 @@ import openai
 import weave
 
 from api2.pipeline import BatchPipeline, OpCall, weave_map
-from api2.provider import calls, LocalQueryable
+from api2.provider import calls, LocalDataframe
 from api2.engine import init_engine
 
 
@@ -37,7 +37,7 @@ def summarize_curdir_py():
     for f_name in glob.glob("*.py"):
         files.append({"name": f_name, "code": open(f_name).read()})
     map = weave_map(
-        LocalQueryable(pd.DataFrame(files)), OpCall(summarize_purpose), n_trials=1
+        LocalDataframe(pd.DataFrame(files)), OpCall(summarize_purpose), n_trials=1
     )
     print(map.cost())
     for delta in map.execute():
@@ -88,6 +88,10 @@ if __name__ == "__main__":
     p.add_step(strlen, column_mapping={"s": "output"})
     print(p.cost())
     print(p.get_result().groupby("classify").mean())
+
+    my_calls = calls(wc, "summarize_purpose", limit=100)
+    p = BatchPipeline(my_calls)
+    p.add_step(classify, my_calls.column("inputs.code"))
 
     # TODO:
     # Goal of this whole exercise: build up something that can

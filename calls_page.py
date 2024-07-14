@@ -14,7 +14,7 @@ from st_components import (
     st_op_selectbox,
     st_wv_column_selectbox,
     st_wv_column_multiselect,
-    st_scatter_plot_mean,
+    wv_st_scatter_plot_mean,
     st_barplot_plot_mean,
     st_scatter_pivotxy_mean_histo,
     st_n_histos,

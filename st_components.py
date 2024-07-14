@@ -44,7 +44,10 @@ def st_safe_df(df):
 
     def to_json_string(val):
         if isinstance(val, list):
-            return json.dumps(val)
+            try:
+                return json.dumps(val)
+            except TypeError:
+                return str(val)
         return val
 
     # Apply the function to each element of the DataFrame
@@ -92,7 +95,7 @@ def st_wv_column_multiselect(
     return st.multiselect(label, ordered_compare_column_names, default=default_val)
 
 
-def st_scatter_plot_mean(df: pd.DataFrame, compare_key: str, x_key: str, y_key: str):
+def wv_st_scatter_plot_mean(df: pd.DataFrame, compare_key: str, x_key: str, y_key: str):
     compare_val_stats_df = df.groupby(compare_key).agg(
         {x_key: ["mean", "sem"], y_key: ["mean", "sem"]}
     )
@@ -338,7 +341,7 @@ def op_version_editor(client, op_name, version):
 
 @st.cache_resource
 def init_local_weave():
-    return weave.init_local_client()
+    return weave.init_local_client("weave2.db")
 
 
 @st.cache_resource

@@ -19,7 +19,7 @@ def get_op_param_names(op: Callable):
 class WeaveMap(Executable):
     data: QuerySequence
     op_call: "OpCall"
-    n_trials: Optional[int]
+    n_trials: int = 1
 
     result: Optional[pd.Series] = None
 
@@ -123,7 +123,7 @@ class BatchPipeline(Executable):
         results = {}
         for step in self.steps.values():
             if isinstance(step, PipelineStep):
-                map = weave_map(self.base, step.op_call)
+                map = WeaveMap(self.base, step.op_call)
                 results[step.step_id] = map.cost()
             elif isinstance(step, PipelineStepCompare):
                 raise NotImplemented
@@ -133,7 +133,7 @@ class BatchPipeline(Executable):
         results = {}
         for step in self.steps.values():
             if isinstance(step, PipelineStep):
-                map = weave_map(self.base, step.op_call)
+                map = WeaveMap(self.base, step.op_call)
                 for delta in map.execute():
                     yield {"step": step.step_id, **delta}
                 results[step.step_id] = map.result
