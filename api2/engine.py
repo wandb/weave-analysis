@@ -1,9 +1,11 @@
-from typing import cast, Optional, Union, Any
+from typing import cast, Optional, Union, Any, Sequence
+from dataclasses import fields
 from weave.weave_client import WeaveClient
 from weave.trace_server.trace_server_interface import (
     _CallsFilter,
     TraceServerInterface,
     CallsQueryReq,
+    RefsReadBatchReq,
 )
 
 from concurrent.futures import ThreadPoolExecutor
@@ -13,9 +15,12 @@ import weave
 import query
 from api2.proto import Query
 from pandas_util import get_unflat_value
+from weave.weave_client import WeaveClient, from_json
+
+from weave_api_next import weave_client_get_batch
 
 from weave.trace.refs import CallRef
-from api2.pipeline import WeaveMap
+from api2.pipeline import WeaveMap, OpCall
 from api2 import engine_context
 from api2.provider import *
 
@@ -54,6 +59,37 @@ class GroupbyAgg:
 
     # def loc(self, idx):
     #     return GroupbyAgg(self.dfgb.filter(lambda x: x.name in idx), self.agg.loc[idx])
+
+
+def sum_dict_leaves(dict1, dict2):
+    def merge_sum(d1, d2):
+        result = {}
+        all_keys = set(d1.keys()) | set(d2.keys())
+
+        for key in all_keys:
+            if key in d1 and key in d2:
+                if isinstance(d1[key], dict) and isinstance(d2[key], dict):
+                    result[key] = merge_sum(d1[key], d2[key])
+                elif isinstance(d1[key], (int, float)) and isinstance(
+                    d2[key], (int, float)
+                ):
+                    result[key] = d1[key] + d2[key]
+                else:
+                    result[key] = d1[
+                        key
+                    ]  # In case of type mismatch, keep the value from dict1
+            elif key in d1:
+                result[key] = d1[key]
+            else:
+                result[key] = d2[key]
+
+        return result
+
+    return merge_sum(dict1, dict2)
+
+
+def merge_cost(c1: dict, c2: dict):
+    return sum_dict_leaves(c1, c2)
 
 
 class Engine:
@@ -123,6 +159,22 @@ class Engine:
             count += len(page)
         return count
 
+    def expand_refs(self, refs: Sequence[str]) -> Sequence[Any]:
+        # Create a dictionary to store unique refs and their results
+        unique_refs = list(set(refs))
+        read_res = self.server.refs_read_batch(
+            RefsReadBatchReq(refs=[uri for uri in unique_refs])
+        )
+
+        # Create a mapping from ref to result
+        ref_to_result = {
+            unique_refs[i]: from_json(val, self.project_id, self.server)
+            for i, val in enumerate(read_res.vals)
+        }
+
+        # Return results in the original order of refs
+        return [ref_to_result[ref] for ref in refs]
+
     def _map_calls_params(self, map: "WeaveMap"):
         return pd.DataFrame(
             {
@@ -136,68 +188,58 @@ class Engine:
     # load calls with those inputs
     # join to our input table, just to get original indexes
     # add a rank column (count original index)
-
     def _map_cached_results(self, map: "WeaveMap"):
-        # OK I'm here in this function, working on making it handle
-        # trials.
-        # Its not working yet, and something seems slow.
-        # Also is it just better to log a trial number in call? Well
-        # we can't really because of being distributed, don't want a global
-        # order key.
-
         # TODO: not ideal, uses client, not server, but engine
         # should be able to run on server
         op_ref = weave.publish(map.op_call.op)
 
-        # Currently loads all historical calls of op.
         calls_df = self._calls_df(_CallsFilter(op_names=[op_ref.uri()]))
 
-        find_inputs_df = self._map_calls_params(map)
-        result_index = pd.MultiIndex.from_product(
-            [find_inputs_df.index, list(range(map.n_trials))]
-        )
+        # Convert op_configs to a DataFrame
+        op_configs_df = self._map_calls_params(map)
+        results: list[Any] = [NOT_COMPUTED] * len(op_configs_df)
 
         if not len(calls_df):
-            return pd.Series([NOT_COMPUTED] * len(result_index), index=result_index)
+            return pd.Series(results, index=op_configs_df.index)
 
+        # Add an index column to keep track of the original order
+        op_configs_df["original_index"] = range(len(op_configs_df))
+
+        # Prepare the calls DataFrame
         calls_df_norm = calls_df.astype(str)
-        calls_df_norm = calls_df_norm.reset_index(names="calls_index")
+        calls_df_norm["call_index"] = calls_df.index
 
         # Prepare the op_configs DataFrame
-        # op_configs_df_normalized = pd.json_normalize(
-        #     find_inputs_df.to_dict(orient="records"), sep="."
-        # )
-        find_inputs_df_normalized = find_inputs_df.add_prefix("inputs.")
-        find_inputs_df_normalized = find_inputs_df_normalized.astype(str)
-        find_inputs_df_normalized = find_inputs_df_normalized.reset_index(
-            names="inputs_index"
+        op_configs_df_normalized = pd.json_normalize(
+            op_configs_df.to_dict(orient="records"), sep="."
         )
+        op_configs_df_normalized = op_configs_df_normalized.add_prefix("inputs.")
+        op_configs_df_normalized = op_configs_df_normalized.astype(str)
 
         # Perform the merge operation
-        merged_df = calls_df_norm.merge(find_inputs_df_normalized, how="right")
+        merged_df = calls_df_norm.merge(
+            op_configs_df_normalized, how="right", indicator=True
+        )
 
         # Group by the original index and aggregate the results
-        grouped = merged_df.groupby("inputs_index")
+        grouped = merged_df.groupby("inputs.original_index")
 
         # Initialize results list with NOT_COMPUTED for all op_configs
 
-        results = {}
         for index, group in grouped:
             # if not isinstance(index, int):
             #     # This is to make the type checker happy. We know its int
             #     # because we constructed it above.
             #     raise ValueError(f"Expected index to be an int, got {index}")
-            # If there's at least one match, use the first match
-            # call_index = match_row["calls_index"]
-            for i, (_, row) in enumerate(group.iterrows()):
-                import math
+            if "both" in group["_merge"].values:
+                # If there's at least one match, use the first match
+                match_row = group[group["_merge"] == "both"].iloc[0]
+                call_index = match_row["call_index"]
+                results[int(index)] = get_unflat_value(
+                    calls_df.loc[call_index], "output"
+                )
 
-                if not math.isnan(row["calls_index"]):
-                    orig_call = calls_df.loc[row["calls_index"]]
-                    if i < map.n_trials:
-                        results[(index, i)] = get_unflat_value(orig_call, "output")
-
-        return pd.Series(results, index=result_index, name="output")
+        return pd.Series(results, index=op_configs_df.index)
 
     def map_cost(self, map: "WeaveMap"):
         cached_results = self._map_cached_results(map)
@@ -206,6 +248,10 @@ class Engine:
     def map_execute(self, map: "WeaveMap"):
         work_to_do = {}
         op_configs = self._map_calls_params(map)
+        # Remove dupes, but we still do too much work.
+        # TODO: ensure we only work on each unique value once!
+        op_configs = op_configs[~op_configs.index.duplicated()]
+
         results = self._map_cached_results(map)
 
         for i, result in results.items():
@@ -228,6 +274,41 @@ class Engine:
 
             for index, result in executor.map(do_one, work_to_do.items()):
                 yield {"index": index, "val": result}
+
+    def cost(self, query: Query):
+        return self._cost(query)
+
+    def _cost(self, query: Query):
+        op = query.from_op
+        if isinstance(op, DBOpMap):
+            input_cost = self.cost(op.input)
+            # TODO: bad executes whole input
+            input_df = self.execute(op.input)
+
+            # Bridge back to WeaveMap for now
+            local_df = LocalDataframe(input_df)
+            map = WeaveMap(local_df, OpCall(op.op, op.column_mapping))
+            return merge_cost(input_cost, map.cost())
+
+        # if isinstance(op, DBOpMap):
+        #     input_cost = self.cost(op.input)
+        #     local_df = LocalDataframe(df)
+        #     map = WeaveMap(local_df, OpCall(op.op, op.column_mapping))
+        #     return merge_cost(input_cost, map.cost())
+        # fields(op)
+
+        # Cost algorithm
+        # - first we must fill the whole query from cache.
+        # - anything downstream of a cache miss is a miss, even if it
+        #   would be a hit if we had the value
+        # - the cost of filling the cache is essentially the cost of the
+        #   whole query.
+        #   - so is it worth it to allow map/cache inside this Query structure?
+        #   - or should it be outside?
+        #   - I think there's another
+        # - yeah, my big question here is, is there 1 API, or 2? (query + batch)
+
+        return {}
 
     def execute(self, query: Query):
         op = query.from_op
@@ -317,6 +398,15 @@ class Engine:
             if df.empty:
                 return df
             return df.columns
+        elif isinstance(op, DBOpMap):
+            df = self.execute(op.input)
+            if df.empty:
+                return df
+
+            # Bridge back to WeaveMap for now
+            local_df = LocalDataframe(df)
+            map = WeaveMap(local_df, OpCall(op.op, op.column_mapping))
+            return map.get_result()
         elif isinstance(op, DBOpGroupBy):
             df = self.execute(op.input)
             if df.empty:
@@ -338,6 +428,13 @@ class Engine:
         elif isinstance(op, DBOpLoc):
             df = self.execute(op.input)
             return df.loc[op.idx]
+        elif isinstance(op, DBOpExpandRef):
+            df = self.execute(op.input)
+            objs = self.expand_refs(df)
+            obj_df = pd.json_normalize(objs)
+            obj_df.index = df
+            obj_df.index.name = "ref"
+            return obj_df
         else:
             raise ValueError(f"Unhandled op {op}")
 

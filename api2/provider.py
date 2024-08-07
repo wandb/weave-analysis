@@ -1,6 +1,7 @@
 # TODO: I think this wants to be called "Source" "ColumnSource"?
 
-from typing import Optional, Union, Any
+import inspect
+from typing import Optional, Union, Any, Callable
 from dataclasses import dataclass
 from weave.weave_client import WeaveClient
 from weave.trace.refs import CallRef
@@ -10,6 +11,14 @@ import pandas as pd
 
 from api2.proto import Query, QuerySequence, Column, DBOp, ListsQuery
 from api2.engine_context import get_engine
+
+
+ColumnMapping = dict[str, str]
+
+
+def get_op_param_names(op: Callable):
+    sig = inspect.signature(op)
+    return list(sig.parameters.keys())
 
 
 @dataclass
@@ -30,6 +39,11 @@ class CallsQuery(Query):
     def groupby(self, col_name):
         return CallsGroupbyQuery(DBOpGroupBy(self, col_name))
 
+    def map(self, op: Callable, column_mapping: Optional[ColumnMapping] = None):
+        if column_mapping is None:
+            column_mapping = {k: k for k in get_op_param_names(op)}
+        return CallValsQuery(DBOpMap(self, op, column_mapping))
+
     def columns(self):
         return CallsColumnsQuery(DBOpCallsColumns(self))
 
@@ -38,13 +52,11 @@ class CallsQuery(Query):
 
     def children(self) -> "CallsChildrenQuery":
         return CallsChildrenQuery(DBOpCallsChildren(self))
-        # return CallsChildrenQuery(self, _CallsFilter())
 
     def __len__(self):
         engine = get_engine()
         query = ValQuery(DBOpLen(self))
         return engine.execute(query)
-        return engine.calls_len(self._filter, limit=self.limit)
 
     def __str__(self):
         engine = get_engine()
@@ -52,16 +64,9 @@ class CallsQuery(Query):
         return str(result)
 
     def to_pandas(self) -> pd.DataFrame:
-        vals = []
-        for page in get_engine().calls_iter_pages(self._filter, limit=self.limit):
-            vals.extend(page)
-        df = pd.json_normalize(vals)
-        if df.empty:
-            return df
-        # df = pd_apply_and_insert(df, "op_name", query.split_obj_ref)
-        call_refs = [CallRef(self.entity, self.project, c["id"]).uri() for c in vals]
-        df.index = pd.Index(call_refs)
-        return df
+        engine = get_engine()
+        result = engine.execute(self)
+        return result
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,16 @@ class DBOpNth(DBOp):
 class DBOpGroupBy(DBOp):
     input: Query
     col_name: str
+
+
+@dataclass(frozen=True)
+class DBOpMap(DBOp):
+    input: Query
+    op: Callable
+    column_mapping: ColumnMapping
+
+    def __hash__(self):
+        return hash((self.input, self.op, tuple(list(self.column_mapping))))
 
 
 @dataclass(frozen=True)
@@ -136,12 +151,36 @@ class DBOpLen(DBOp):
 
 
 @dataclass(frozen=True)
-class CallValsQuery:
+class DBOpExpandRef(DBOp):
+    input: Query
+
+
+@dataclass(frozen=True)
+class CallValsQuery(Query):
     from_op: DBOp
+
+    def expand_ref(self):
+        return CallValsQuery(DBOpExpandRef(self))
+
+    def column(self, column_name: str):
+        return CallValsQuery(DBOpCallsColumn(self, column_name))
+
+    def map(self, op: Callable, column_mapping: Optional[ColumnMapping] = None):
+        if column_mapping is None:
+            column_mapping = {k: k for k in get_op_param_names(op)}
+        return CallValsQuery(DBOpMap(self, op, column_mapping))
 
     def __str__(self):
         engine = get_engine()
         return str(engine.execute(self))
+
+    def cost(self):
+        engine = get_engine()
+        return engine.cost(self)
+
+    def to_pandas(self) -> pd.DataFrame:
+        engine = get_engine()
+        return engine.execute(self)
 
 
 @dataclass(frozen=True)
@@ -215,7 +254,7 @@ class CallsGroupbyAggQuery(Query):
     def groups(self):
         return CallsChildrenQuery(DBOpCallsGroupbyGroups(self))
 
-    def to_pandas(self):
+    def to_pandas(self) -> pd.DataFrame:
         engine = get_engine()
         gb_agg = engine.execute(self)
         return gb_agg.agg
@@ -300,8 +339,8 @@ def calls(
 SourceType = Union[QuerySequence, pd.DataFrame, list[dict]]
 
 
-def make_source(val: SourceType) -> QuerySequence:
-    if isinstance(val, QuerySequence):
+def make_source(val: SourceType) -> Query:
+    if isinstance(val, Query):
         return val
     elif isinstance(val, pd.DataFrame):
         return LocalDataframe(val)

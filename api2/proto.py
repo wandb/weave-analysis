@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from typing import Any, Iterator, Protocol, runtime_checkable
 
 import pandas as pd
 
 
+@dataclass(frozen=True)
 class DBOp:
     pass
 
