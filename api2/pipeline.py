@@ -316,3 +316,63 @@ class ResultTable:
             t = pd.concat(op_call_results)
             t.index = range(len(t))
         return t
+
+
+@dataclass
+class ResultTable:
+    bound_pipeline: BoundPipeline
+    results: dict[str, dict[str, pd.Series]] = field(init=False)
+
+    def __post_init__(self):
+        self.results = {}
+        self._initial_df = pd.DataFrame(dict(self.bound_pipeline.params))
+        self.fill_from_cache()
+
+    def _process_pipeline(self, initialize=False):
+        t = self._initial_df.copy()
+        for step_id, op_calls in self.bound_pipeline.pipeline.steps.items():
+            t = self._process_step(step_id, op_calls, t, initialize)
+            t.index = range(len(t))
+        return t
+
+    def _process_step(self, step_id, op_calls, t, initialize):
+        op_call_results = []
+        for op_call in op_calls:
+            if initialize:
+                result = batch_get(t, op_call.op)
+                self.results.setdefault(step_id, {})[op_call.op.ref.uri()] = result
+            else:
+                result = self.results[step_id][op_call.op.ref.uri()]
+
+            op_call_columns = pd.DataFrame(
+                {
+                    f"{step_id}_op_ref": [op_call.op.ref.uri()] * len(result),
+                    f"{step_id}_output": result,
+                }
+            )
+            op_call_result = pd.concat([t, op_call_columns], axis=1)
+            op_call_results.append(op_call_result)
+        return pd.concat(op_call_results)
+
+    def fill_from_cache(self):
+        self._process_pipeline(initialize=True)
+
+    def remaining_cost(self):
+        to_compute = {
+            op_uri: (op_call_result == NOT_COMPUTED).sum()
+            for step_id, op_call_results in self.results.items()
+            for op_uri, op_call_result in op_call_results.items()
+        }
+        return {"to_compute": to_compute}
+
+    def fill(self):
+        t = self._initial_df.copy()
+        for step_id, op_calls in self.bound_pipeline.pipeline.steps.items():
+            for op_call in op_calls:
+                result = self.results[step_id][op_call.op.ref.uri()]
+                yield from batch_fill(t, op_call.op, result)
+            t = self._process_step(step_id, op_calls, t, initialize=False)
+            t.index = range(len(t))
+
+    def to_pandas(self):
+        return self._process_pipeline(initialize=False)
