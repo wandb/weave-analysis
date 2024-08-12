@@ -23,6 +23,17 @@ from weave.trace.refs import CallRef
 from api2.pipeline import WeaveMap, OpCall
 from api2 import engine_context
 from api2.provider import *
+from weave.trace.vals import ObjectRecord
+
+
+def unweaveify(val):
+    if isinstance(val, list):
+        return [unweaveify(v) for v in val]
+    elif isinstance(val, dict):
+        return {k: unweaveify(v) for k, v in val.items()}
+    elif isinstance(val, ObjectRecord):
+        return val.__dict__
+    return val
 
 
 class NotComputed:
@@ -431,7 +442,8 @@ class Engine:
         elif isinstance(op, DBOpExpandRef):
             df = self.execute(op.input)
             objs = self.expand_refs(df)
-            obj_df = pd.json_normalize(objs)
+            unweaved_objs = unweaveify(objs)
+            obj_df = pd.json_normalize(unweaved_objs)
             obj_df.index = df
             obj_df.index.name = "ref"
             return obj_df

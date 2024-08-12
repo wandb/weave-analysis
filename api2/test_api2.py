@@ -9,7 +9,7 @@ import weave
 from api2 import example_eval
 from api2.engine import init_engine
 from api2.provider import calls
-from api2.pipeline import BatchPipeline, Pipeline, ResultTable
+from api2.pipeline import BatchPipeline, Pipeline, PipelineResults
 from api2.cache import batch_get, batch_fill
 
 # @pytest.fixture
@@ -284,7 +284,7 @@ def test_classify_prod(client):
 
 def eval_lazy(
     eval: weave.Evaluation, models: list[Callable], n_trials: int = 1
-) -> ResultTable:
+) -> PipelineResults:
     # dataset = pd.DataFrame(list(eval.dataset.rows))
     # TODO: Repeat data with weave_trial param column
     pipeline = Pipeline()
@@ -300,7 +300,7 @@ def eval_lazy(
     for scorer in eval.scorers:
         pipeline.add_step(scorer)
 
-    # Here we bind out pipeline to our dataset, for the number of trials we want.
+    # Here we bind our pipeline to our dataset, for the number of trials we want.
     # An alternative would be eval.dataset.lazy_apply(pipeline, n_trials)
     bound_pipeline = pipeline.lazy_call(eval.dataset, n_trials=n_trials)
 
@@ -315,7 +315,7 @@ def test_eval_lazy():
     init_engine(client)
     eval = weave.Evaluation(dataset=example_eval.dataset, scorers=[example_eval.match])
     t = eval_lazy(eval, [example_eval.sentiment_simple, example_eval.sentiment_better])
-    assert t.remaining_cost() == {
+    assert t.execute_cost() == {
         "to_compute": {
             example_eval.match.ref.uri(): 10,
             example_eval.sentiment_better.ref.uri(): 5,
@@ -323,10 +323,10 @@ def test_eval_lazy():
         }
     }
 
-    for delta in t.fill():
+    for delta in t.execute():
         print("DELTA", delta)
 
-    assert t.remaining_cost() == {
+    assert t.execute_cost() == {
         "to_compute": {
             example_eval.match.ref.uri(): 0,
             example_eval.sentiment_better.ref.uri(): 0,
@@ -404,6 +404,29 @@ def test_eval_lazy():
     )
 
 
+def test_classify_prod2(client):
+    prod_calls = weave.calls("some-prod-op")
+    pipeline = Pipeline()
+    pipeline.add_step(classify)
+    # pipeline.
+
+    # First, add our model calls. Using the same step_id means we will
+    # call each model in that position
+    for model in models:
+        pipeline.add_step(model, step_id="model")
+
+    df = prod_calls.group_by(prod_calls.map(classify))["summary.tokens"].mean()
+    plot = weave.Plot(
+        inputs=prod_calls,
+        x=classify,
+        # x={"classifier1": classify, "classifier2": classify.versions[-2]},
+        y=prod_calls.summary["tokens"],
+    )
+    for delta in plot.execute():
+        pass
+    print(plot.get_result())
+
+
 def format_progress_line(cost, summary):
     # TODO: this should be a nice progress line!
     return f"{cost} {summary}"
@@ -412,10 +435,10 @@ def format_progress_line(cost, summary):
 # This is how things work if you just run in the terminal.
 def eval_run(
     eval: weave.Evaluation, models: list[Callable], n_trials: int = 1
-) -> ResultTable:
+) -> PipelineResults:
     t = eval_lazy(eval, models, n_trials)
     # t.fill() begins executing all the necessary operations for computing results.
-    progress_bar = tqdm.tqdm(t.fill())
+    progress_bar = tqdm.tqdm(t.execute())
     # We can iterate through t.fill()'s returned iterator to see the deltas (each
     # op's result)
     for delta in progress_bar:
@@ -426,7 +449,7 @@ def eval_run(
         t_summary = t.summary()
         # t.remaining_cost() tells us what ops still need to be computed (counts)
         # and can eventually include estimated timing, $, etc.
-        t_cost = t.remaining_cost()
+        t_cost = t.execute_cost()
         # Show the user the cost and summary as results are computed.
         progress_bar.set_description(format_progress_line(t_cost, t_summary))
 

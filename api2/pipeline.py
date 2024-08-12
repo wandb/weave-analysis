@@ -238,6 +238,8 @@ class DictLikeDataset(DictLike):
 def to_dict_like(v) -> DictLike:
     if isinstance(v, Dataset):
         return DictLikeDataset(v)
+    elif isinstance(v, dict):
+        return v
     else:
         raise ValueError(f"Unsupported type {type(v)}")
 
@@ -255,7 +257,20 @@ class PipelineResults:
 
     def __post_init__(self):
         self.results = {}
-        self._initial_df = pd.DataFrame(dict(self.bound_pipeline.params))
+        initial_df = pd.DataFrame(dict(self.bound_pipeline.params))
+        if self.bound_pipeline.n_trials > 1:
+            dfs = []
+            for i in range(0, self.bound_pipeline.n_trials):
+                df = initial_df.copy()
+                # TODO: this is not yet used in weave caching. Need to build
+                # in!
+                df["weave_trial"] = i
+                dfs.append(df)
+            initial_df = pd.concat(dfs)
+        self._initial_df = initial_df
+        # self._initial_df = pd.concat(
+        #     [self._initial_df] * self.bound_pipeline.n_trials
+        # )
         self.fill_from_cache()
 
     def _process_pipeline(self, fill_from_cache=False):
