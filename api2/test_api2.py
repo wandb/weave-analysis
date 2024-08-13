@@ -54,12 +54,13 @@ def test_read_api_works(client):
     assert stats_df["output.scores.match.mean"].tolist() == [0.8, 0.2]
     assert stats_df["output.scores.match.sem"].tolist() == [0.2, 0.2]
 
+    # TODO: map API currently disabled. Only pipeline API works for now.
     # Can map.
-    # TODO: This needs to support trials, cost and result streaming!
-    classes = inputs_example.map(classify)
-    assert classes.cost() == {"to_compute": 10}
-    classes_df = classes.to_pandas()
-    assert classes_df.value_counts().to_dict() == {"text": 4, "symbols": 1}
+    # # TODO: This needs to support trials, cost and result streaming!
+    # classes = inputs_example.map(classify)
+    # assert classes.cost() == {"to_compute": 10}
+    # classes_df = classes.to_pandas()
+    # # assert classes_df.value_counts().to_dict() == {"text": 4, "symbols": 1}
 
 
 def test_eval_execute_api_works(client):
