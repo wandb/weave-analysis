@@ -10,9 +10,9 @@ from api2 import example_eval
 from api2 import example_agent
 from api2.cache import NOT_COMPUTED
 from api2.engine import init_engine
-from api2.provider import calls
+from api2.query_api import calls
 from api2.evaluate import eval_lazy
-from api2.pipeline import Pipeline
+from api2.execute_api import Pipeline
 
 # from api2.cache import batch_get, batch_fill
 

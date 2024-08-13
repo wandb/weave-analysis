@@ -2,8 +2,8 @@ import weave
 import openai
 import textwrap
 from api2.engine import init_engine
-from api2.provider import calls
-from api2.pipeline import Pipeline
+from api2.query_api import calls
+from api2.execute_api import Pipeline
 
 
 @weave.op()

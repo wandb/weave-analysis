@@ -2,10 +2,10 @@ from functools import wraps
 import openai
 from st_components import *
 
-from api2.provider import calls
+from api2.query_api import calls
 from api2.engine import init_engine
-from api2.provider import Query
-from api2.pipeline import weave_map
+from api2.query_api import Query
+from api2.execute_api import weave_map
 
 
 def wv_st_plotly_chart(data, fig):

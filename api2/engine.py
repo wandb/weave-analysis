@@ -15,7 +15,7 @@ from weave.weave_client import WeaveClient, from_json
 
 from weave.trace.refs import CallRef
 from api2 import engine_context
-from api2.provider import *
+from api2.query_api import *
 from weave.trace.vals import ObjectRecord
 
 
