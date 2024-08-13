@@ -9,7 +9,7 @@ from weave.trace_server.trace_server_interface import _CallsFilter
 
 import pandas as pd
 
-from api2.proto import Query, QuerySequence, Column, DBOp, ListsQuery
+from api2.proto import Query, Column, DBOp, ListsQuery
 from api2.engine_context import get_engine
 
 
@@ -305,14 +305,6 @@ class LocalDataframeColumn(Column):
         return self.series
 
 
-class LocalDataframe(QuerySequence):
-    def __init__(self, df):
-        self.df = df
-
-    def column(self, column_name: str):
-        return LocalDataframeColumn(self.df[column_name])
-
-
 def calls(
     self: WeaveClient,
     op_names: Optional[Union[str, list[str]]],
@@ -334,16 +326,3 @@ def calls(
     return CallsQuery(
         DBOpCallsTableRoot(self.entity, self.project), trace_server_filt, limit=limit
     )
-
-
-SourceType = Union[QuerySequence, pd.DataFrame, list[dict]]
-
-
-def make_source(val: SourceType) -> Query:
-    if isinstance(val, Query):
-        return val
-    elif isinstance(val, pd.DataFrame):
-        return LocalDataframe(val)
-    elif isinstance(val, list):
-        return LocalDataframe(pd.DataFrame(val))
-    raise ValueError("Must provide a... TODO")

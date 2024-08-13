@@ -33,11 +33,6 @@ class ListsQuery(Query):
     pass
 
 
-@runtime_checkable
-class QuerySequence(Protocol):
-    def column(self, column_name: str) -> Column: ...
-
-
 class OpType(Protocol):
     name: str
 

@@ -14,7 +14,6 @@ from weave.weave_client import WeaveClient, from_json
 
 
 from weave.trace.refs import CallRef
-from api2.pipeline import WeaveMap, OpCall
 from api2 import engine_context
 from api2.provider import *
 from weave.trace.vals import ObjectRecord
@@ -217,15 +216,15 @@ class Engine:
             # TODO: This should probably return column types, using something
             # like query.friendly_dtypes
             return df.columns
-        elif isinstance(op, DBOpMap):
-            df = self.execute(op.input)
-            if df.empty:
-                return df
+        # elif isinstance(op, DBOpMap):
+        #     df = self.execute(op.input)
+        #     if df.empty:
+        #         return df
 
-            # Bridge back to WeaveMap for now
-            local_df = LocalDataframe(df)
-            map = WeaveMap(local_df, OpCall(op.op, op.column_mapping))
-            return map.get_result()
+        #     # Bridge back to WeaveMap for now
+        #     local_df = LocalDataframe(df)
+        #     map = WeaveMap(local_df, OpCall(op.op, op.column_mapping))
+        #     return map.get_result()
         elif isinstance(op, DBOpGroupBy):
             df = self.execute(op.input)
             if df.empty:
