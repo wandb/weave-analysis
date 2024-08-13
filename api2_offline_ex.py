@@ -4,8 +4,8 @@ import openai
 
 import weave
 
-from api2.pipeline import BatchPipeline, OpCall, weave_map
-from api2.provider import calls, LocalDataframe
+from api2.execute_api import BatchPipeline, OpCall, weave_map
+from api2.query_api import calls, LocalDataframe
 from api2.engine import init_engine
 
 

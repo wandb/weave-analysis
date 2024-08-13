@@ -2,7 +2,7 @@ import tqdm
 from typing import Callable
 import weave
 
-from api2.pipeline import Pipeline, PipelineResults
+from api2.execute_api import Pipeline, PipelineResults
 
 
 def eval_lazy(
