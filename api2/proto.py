@@ -17,13 +17,6 @@ class Executable(Protocol):
     def get_result(self) -> Any: ...
 
 
-# Really this is like a Pandas series
-# it has a name (which could be a tuple?) and an index.
-# So spec this out more.
-class Column(Protocol):
-    def to_pandas(self) -> pd.Series: ...
-
-
 @runtime_checkable
 class Query(Protocol):
     from_op: DBOp

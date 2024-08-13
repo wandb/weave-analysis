@@ -1,15 +1,12 @@
-# TODO: I think this wants to be called "Source" "ColumnSource"?
-
 import inspect
 from typing import Optional, Union, Any, Callable
 from dataclasses import dataclass
 from weave.weave_client import WeaveClient
-from weave.trace.refs import CallRef
 from weave.trace_server.trace_server_interface import _CallsFilter
 
 import pandas as pd
 
-from api2.proto import Query, Column, DBOp, ListsQuery
+from api2.proto import Query, DBOp, ListsQuery
 from api2.engine_context import get_engine
 
 
@@ -19,12 +16,6 @@ ColumnMapping = dict[str, str]
 def get_op_param_names(op: Callable):
     sig = inspect.signature(op)
     return list(sig.parameters.keys())
-
-
-@dataclass
-class Index:
-    level_names: list[str]
-    values: list[tuple]
 
 
 @dataclass(frozen=True)
@@ -261,32 +252,6 @@ class CallsGroupbyAggQuery(Query):
 
 
 @dataclass(frozen=True)
-class CallsQueryColumn(Column):
-    calls_query: "CallsQuery"
-    column_name: str
-
-    def __len__(self):
-        return len(self.calls_query)
-
-    def to_pandas(self) -> pd.Series:
-        # TODO: This logic should be shared with CallsQuery.to_pandas
-        vals = []
-        for page in get_engine().calls_iter_pages(
-            self.calls_query._filter, limit=self.calls_query.limit
-        ):
-            vals.extend(page)
-        df = pd.json_normalize(vals)
-        if df.empty:
-            return pd.Series()
-        call_refs = [
-            CallRef(self.calls_query.entity, self.calls_query.project, c["id"]).uri()
-            for c in vals
-        ]
-        df.index = pd.Index(call_refs)
-        return df[self.column_name]
-
-
-@dataclass(frozen=True)
 class CallsColumnsQuery:
     from_op: DBOp
     column_filter = None  # TODO
@@ -295,14 +260,6 @@ class CallsColumnsQuery:
         engine = get_engine()
         result = engine.execute(self)
         return str(result)
-
-
-class LocalDataframeColumn(Column):
-    def __init__(self, series):
-        self.series = series
-
-    def to_pandas(self) -> pd.Series:
-        return self.series
 
 
 def calls(
