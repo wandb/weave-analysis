@@ -31,9 +31,7 @@ def classify(doc):
         return "text"
 
 
-def test_read_api_works():
-    client = weave.init_local_client("file::memory:?cache=shared")
-    init_engine(client)
+def test_read_api_works(client):
     eval = weave.Evaluation(dataset=example_eval.dataset, scorers=[example_eval.match])
     res = asyncio.run(eval.evaluate(example_eval.sentiment_simple))
     assert res["match"]["true_count"] == 1
@@ -64,9 +62,7 @@ def test_read_api_works():
     assert classes_df.value_counts().to_dict() == {"text": 4, "symbols": 1}
 
 
-def test_eval_execute_api_works():
-    client = weave.init_local_client("file::memory:?cache=shared")
-    init_engine(client)
+def test_eval_execute_api_works(client):
     eval = weave.Evaluation(dataset=example_eval.dataset, scorers=[example_eval.match])
     t = eval_lazy(eval, [example_eval.sentiment_simple, example_eval.sentiment_better])
     assert t.execute_cost() == {
@@ -159,10 +155,7 @@ def test_eval_execute_api_works():
 
 
 # This test combines the read and execute APIs
-def test_agent_summarize():
-    client = weave.init_local_client("file::memory:?cache=shared")
-    init_engine(client)
-
+def test_agent_summarize(client):
     agent = example_agent.Agent()
     example_agent.run(agent, example_agent.INITIAL_STATE)
     example_agent.run(agent, example_agent.INITIAL_STATE)
