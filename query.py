@@ -27,8 +27,8 @@ def simple_val(v):
         return [simple_val(v) for v in v]
     elif hasattr(v, "uri"):
         return v.uri()
-    elif hasattr(v, "__dict__"):
-        return {k: simple_val(v) for k, v in v.__dict__.items()}
+    # elif hasattr(v, "__dict__"):
+    #     return {k: simple_val(v) for k, v in v.__dict__.items()}
     else:
         return v
 

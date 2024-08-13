@@ -1,9 +1,11 @@
 from functools import wraps
+import openai
 from st_components import *
 
 from api2.provider import calls
 from api2.engine import init_engine
 from api2.provider import Query
+from api2.pipeline import weave_map
 
 
 def wv_st_plotly_chart(data, fig):
@@ -56,19 +58,46 @@ t1 = targets[1]
 wc = init_remote_weave("humaneval6")
 init_engine(wc)
 
-my_calls = calls(wc, op, limit=1000)
+my_calls = calls(wc, op, limit=10)
+example = my_calls.column("inputs.example").expand_ref()
 
 
-sel_models = wv_st_scatter_plot_mean(
-    my_calls,
-    "inputs.model",
-    t1,
-    t0,
-)
+@weave.op()
+def classify(code: str):
+    prompt = f"Classify the following code. Return a single word.\n\n{code}\n\nClass:"
+    response = openai.chat.completions.create(
+        model="gpt-4o", messages=[{"role": "system", "content": prompt}]
+    )
+    return response.choices[0].message.content
 
-sel_examples = wv_st_scatter_plot_mean(sel_models.groups(), "inputs.example", t1, t0)
 
-st.dataframe(sel_examples.groups(), hide_index=True)
+mapper = weave_map(example, classify, {"code": "prompt"})
+st.dataframe(example, hide_index=True)
+
+cost = mapper.cost()
+st.write(cost)
+if cost["to_compute"]:
+    if st.button("Execute"):
+        prog = st.progress(0, "computing")
+        for i, delta in enumerate(mapper.execute()):
+            prog.progress((i + 1) / cost["to_compute"])
+        st.rerun()
+else:
+    st.dataframe(mapper.get_result())
+
+# TODO: OK this works. Now I need to get all of it working in one table
+# so I can do a groupby
+
+# sel_models = wv_st_scatter_plot_mean(
+#     my_calls,
+#     "inputs.model",
+#     t1,
+#     t0,
+# )
+
+# sel_examples = wv_st_scatter_plot_mean(sel_models.groups(), "inputs.example", t1, t0)
+
+# st.dataframe(sel_examples.groups(), hide_index=True)
 
 # df_sel = wv_st_dataframe(sel)
 # # df_sel.group_vals()
