@@ -340,8 +340,8 @@ def op_version_editor(client, op_name, version):
 
 
 @st.cache_resource
-def init_local_weave():
-    return weave.init_local_client("weave2.db")
+def init_local_weave(db_path: str):
+    return weave.init_local_client(db_path)
 
 
 @st.cache_resource
@@ -355,4 +355,5 @@ def st_project_picker():
         project_name = st.text_input("project name")
         return init_remote_weave(project_name)
     else:
-        return init_local_weave()
+        db_file = st.text_input("db file path", value="example_eval.db")
+        return init_local_weave(db_file)
