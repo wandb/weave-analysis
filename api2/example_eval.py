@@ -1,3 +1,5 @@
+# Example evaluation script for unit tests
+
 import asyncio
 import weave
 

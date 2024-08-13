@@ -7,9 +7,12 @@ from pandas.testing import assert_series_equal
 
 import weave
 from api2 import example_eval
+from api2 import example_agent
+from api2.cache import NOT_COMPUTED
 from api2.engine import init_engine
 from api2.provider import calls
 from api2.evaluate import eval_lazy
+from api2.pipeline import Pipeline
 
 # from api2.cache import batch_get, batch_fill
 
@@ -28,7 +31,7 @@ def classify(doc):
         return "text"
 
 
-def test_works():
+def test_read_api_works():
     client = weave.init_local_client("file::memory:?cache=shared")
     init_engine(client)
     eval = weave.Evaluation(dataset=example_eval.dataset, scorers=[example_eval.match])
@@ -61,7 +64,7 @@ def test_works():
     assert classes_df.value_counts().to_dict() == {"text": 4, "symbols": 1}
 
 
-def test_eval_lazy():
+def test_eval_execute_api_works():
     client = weave.init_local_client("file::memory:?cache=shared")
     init_engine(client)
     eval = weave.Evaluation(dataset=example_eval.dataset, scorers=[example_eval.match])
@@ -153,3 +156,69 @@ def test_eval_lazy():
             dtype=object,
         ),
     )
+
+
+# This test combines the read and execute APIs
+def test_agent_summarize():
+    client = weave.init_local_client("file::memory:?cache=shared")
+    init_engine(client)
+
+    agent = example_agent.Agent()
+    example_agent.run(agent, example_agent.INITIAL_STATE)
+    example_agent.run(agent, example_agent.INITIAL_STATE)
+
+    q = calls(client, "run", limit=10)
+    # Each agent run has N agent "step" calls as children.
+    q = q.children()
+    # Take the last present step, which includes the full conversation history.
+    q = q.nth(-1)
+    # The "state" parameter is the AgentState which includes the history
+    q = q.column("inputs.state")
+    # Its a ref to an AgentState object, so expand it.
+    q = q.expand_ref()
+    # Grab the history attribute, which is the list of messages.
+    q = q.column("history")
+
+    df = q.to_pandas()
+
+    # Construct a PipelineResults object.
+    p = Pipeline()
+    p.add_step(example_agent.summarize_run_rollout)
+    bound_p = p.lazy_call({"history": df})
+    result_table = bound_p.fetch_existing_results()
+    result_table_df = result_table.to_pandas()
+
+    # Prior to execute, there may be un-computed results
+    assert len(result_table_df) == 2
+    assert result_table_df["summarize_run_rollout_output"].iloc[0] == NOT_COMPUTED
+    assert result_table_df["summarize_run_rollout_output"].iloc[1] == NOT_COMPUTED
+
+    # Need to execute 2 summary ops
+    assert result_table.execute_cost() == {
+        "to_compute": {
+            "weave:///none/none/op/summarize_run_rollout:YO6VGCp7thn6OAFnXmpD10sM3D2qVYltLOQpys99lHk": 2
+        }
+    }
+
+    # Execute the pipeline printing results as they are available.
+    for i, delta in enumerate(result_table.execute()):
+        pass
+
+    # Got our summaries
+    result_table_df = result_table.to_pandas()
+    assert len(result_table_df) == 2
+    assert (
+        result_table_df["summarize_run_rollout_output"].iloc[0]
+        == "[{'role': 'system', 'content': 'you are smart'}, {'role': 'user', 'content': 'step 1'}, {'role': 'user', 'content': 'step 2'}]"
+    )
+    assert (
+        result_table_df["summarize_run_rollout_output"].iloc[1]
+        == "[{'role': 'system', 'content': 'you are smart'}, {'role': 'user', 'content': 'step 4'}, {'role': 'user', 'content': 'step 5'}]"
+    )
+
+    # Nothing left to compute
+    assert result_table.execute_cost() == {
+        "to_compute": {
+            "weave:///none/none/op/summarize_run_rollout:YO6VGCp7thn6OAFnXmpD10sM3D2qVYltLOQpys99lHk": 0
+        }
+    }

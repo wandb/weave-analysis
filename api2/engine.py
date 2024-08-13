@@ -455,6 +455,4 @@ class Engine:
 
 
 def init_engine(wc: WeaveClient):
-    if engine_context.ENGINE:
-        return
     engine_context.ENGINE = Engine(wc._project_id(), wc.server)
