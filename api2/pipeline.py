@@ -321,3 +321,8 @@ class PipelineResults:
 
     def to_pandas(self):
         return self._process_pipeline(fill_from_cache=False)
+
+    def summary(self):
+        # This would do summarization like we do for evals currently, but presumably
+        # be more configurable.
+        raise NotImplemented
